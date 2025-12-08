@@ -1,0 +1,199 @@
+{
+	"info": {
+		"name": "SafeVoice SMS API Test Collection",
+		"description": "Collection for testing SafeVoice SMS API endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "SMS Service Status",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/status",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "status"]
+				}
+			}
+		},
+		{
+			"name": "Send Single SMS",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_number\": \"0760299974\",\n    \"message\": \"Test SMS from SafeVoice API\",\n    \"reference\": \"TEST_{{$timestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/send-single",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "send-single"]
+				}
+			}
+		},
+		{
+			"name": "Send Multiple SMS",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_numbers\": [\"0760299974\", \"0712345678\"],\n    \"message\": \"Bulk SMS test from SafeVoice API\",\n    \"reference\": \"BULK_TEST_{{$timestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/send-multiple",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "send-multiple"]
+				}
+			}
+		},
+		{
+			"name": "Send Invitation SMS",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_number\": \"0760299974\",\n    \"user_name\": \"John Doe\",\n    \"company_name\": \"SafeVoice Ltd\",\n    \"invitation_link\": \"https://app.safevoice.tz/accept-invitation?token=abc123\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/send-invitation",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "send-invitation"]
+				}
+			}
+		},
+		{
+			"name": "Send Verification SMS",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_number\": \"0760299974\",\n    \"verification_code\": \"123456\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/send-verification",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "send-verification"]
+				}
+			}
+		},
+		{
+			"name": "Send Password Reset SMS",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_number\": \"0760299974\",\n    \"user_name\": \"John Doe\",\n    \"reset_link\": \"https://app.safevoice.tz/reset-password?token=xyz789\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/send-password-reset",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "send-password-reset"]
+				}
+			}
+		},
+		{
+			"name": "Validate Phone Number",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "json",
+					"raw": "{\n    \"phone_number\": \"0760299974\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/validate-phone",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "validate-phone"]
+				}
+			}
+		},
+		{
+			"name": "API Documentation",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/sms/test/documentation",
+					"host": ["{{base_url}}"],
+					"path": ["api", "sms", "test", "documentation"]
+				}
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000"
+		}
+	]
+}

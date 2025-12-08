@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeVoice - Case Messaging</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Custom scrollbar */
+        .messages-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .messages-list::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        
+        .messages-list::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        
+        .messages-list::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* Message animations */
+        .message-enter-active {
+            transition: all 0.3s ease;
+        }
+        
+        .message-enter-from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        
+        /* Gradient backgrounds */
+        .bg-gradient-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .bg-gradient-success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-gradient-primary text-white shadow-lg">
+            <div class="container mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-10 h-10 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-shield-alt text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-bold">SafeVoice</h1>
+                            <p class="text-sm opacity-90">Case Communication Portal</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <p class="text-sm opacity-90">{{ currentUserType === 'reporter' ? 'Case Reporter' : 'Investigator' }}</p>
+                            <p class="text-xs opacity-75">{{ formatDateTime(new Date()) }}</p>
+                        </div>
+                        <button @click="logout" class="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="container mx-auto px-6 py-6">
+            <!-- Login Form -->
+            <div v-if="!isLoggedIn" class="max-w-md mx-auto">
+                <div class="bg-white rounded-2xl shadow-xl p-8">
+                    <div class="text-center mb-8">
+                        <div class="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <i class="fas fa-lock text-white text-2xl"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800">Case Access</h2>
+                        <p class="text-gray-600 mt-2">Enter your case credentials to continue</p>
+                    </div>
+
+                    <form @submit.prevent="login" class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Access ID</label>
+                            <input
+                                v-model="loginForm.access_id"
+                                type="text"
+                                required
+                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Enter your access ID"
+                            >
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Access Password</label>
+                            <input
+                                v-model="loginForm.access_password"
+                                type="password"
+                                required
+                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Enter your access password"
+                            >
+                        </div>
+
+                        <button
+                            type="submit"
+                            :disabled="isLoggingIn"
+                            class="w-full bg-gradient-primary text-white py-3 px-4 rounded-lg font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                        >
+                            <i v-if="isLoggingIn" class="fas fa-spinner animate-spin mr-2"></i>
+                            {{ isLoggingIn ? 'Signing In...' : 'Sign In' }}
+                        </button>
+
+                        <div v-if="loginError" class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>
+                            {{ loginError }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Chat Interface -->
+            <div v-else class="max-w-6xl mx-auto">
+                <div class="bg-white rounded-2xl shadow-xl overflow-hidden" style="height: calc(100vh - 200px);">
+                    <!-- Chat Header -->
+                    <div class="flex items-center justify-between p-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-12 h-12 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
+                                <i class="fas fa-comments text-xl"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-semibold">Case Communication</h3>
+                                <p class="text-sm opacity-90">Case #{{ caseToken }}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <div class="flex items-center space-x-2 bg-white bg-opacity-20 rounded-lg px-3 py-2">
+                                <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                                <span class="text-sm">Online</span>
+                            </div>
+                            <button 
+                                @click="refreshMessages" 
+                                class="p-2 hover:bg-white hover:bg-opacity-20 rounded-lg transition-colors"
+                                :disabled="isLoading"
+                            >
+                                <i class="fas fa-sync-alt" :class="{ 'animate-spin': isLoading }"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Messages Area -->
+                    <div class="flex-1 overflow-hidden bg-gray-50" style="height: calc(100% - 80px);">
+                        <div class="messages-list h-full overflow-y-auto p-6">
+                            <!-- Loading State -->
+                            <div v-if="isLoading" class="flex items-center justify-center h-64">
+                                <div class="text-center text-gray-500">
+                                    <div class="text-4xl mb-4">
+                                        <i class="fas fa-spinner animate-spin"></i>
+                                    </div>
+                                    <p class="text-lg">Loading messages...</p>
+                                </div>
+                            </div>
+
+                            <!-- Empty State -->
+                            <div v-else-if="messages.length === 0" class="flex items-center justify-center h-64">
+                                <div class="text-center text-gray-500">
+                                    <div class="text-4xl mb-4 text-gray-400">
+                                        <i class="fas fa-comments"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold mb-2">No messages yet</h4>
+                                    <p>Start the conversation by sending a message below.</p>
+                                </div>
+                            </div>
+
+                            <!-- Messages -->
+                            <div v-else class="space-y-6">
+                                <div
+                                    v-for="message in messages"
+                                    :key="message.id"
+                                    class="message-item"
+                                    :class="getMessageAlignment(message)"
+                                >
+                                    <div 
+                                        class="message-card max-w-2xl rounded-2xl shadow-lg border transition-all duration-200 hover:shadow-xl"
+                                        :class="getMessageCardClass(message)"
+                                    >
+                                        <!-- Message Header -->
+                                        <div class="flex items-center justify-between p-4 pb-2">
+                                            <div class="flex items-center space-x-3">
+                                                <div 
+                                                    class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold shadow-md"
+                                                    :class="getAvatarClass(message)"
+                                                >
+                                                    <i :class="getSenderIcon(message)"></i>
+                                                </div>
+                                                <div>
+                                                    <span class="font-semibold text-gray-800 text-sm">{{ getSenderName(message) }}</span>
+                                                    <p class="text-xs text-gray-500">{{ formatTime(message.created_at) }}</p>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center space-x-2">
+                                                <span v-if="message.priority !== 'normal'" 
+                                                      class="px-2 py-1 rounded-full text-xs font-bold uppercase"
+                                                      :class="getPriorityClass(message.priority)">
+                                                    {{ message.priority }}
+                                                </span>
+                                                <span v-if="!message.is_read && message.sender_type !== currentUserType" 
+                                                      class="text-blue-500 text-xs">
+                                                    <i class="fas fa-circle"></i>
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Message Content -->
+                                        <div class="px-4 pb-2">
+                                            <!-- Reply Context -->
+                                            <div v-if="message.parent_message_id" 
+                                                 class="flex items-center space-x-2 text-sm text-gray-600 mb-2 p-2 bg-gray-50 rounded-lg border-l-2 border-gray-300">
+                                                <i class="fas fa-reply"></i>
+                                                <span>Replying to previous message</span>
+                                            </div>
+
+                                            <!-- Message Text -->
+                                            <div class="text-gray-800 leading-relaxed whitespace-pre-wrap mb-3">
+                                                {{ message.message }}
+                                            </div>
+
+                                            <!-- Attachments -->
+                                            <div v-if="message.has_attachments && message.attachments" 
+                                                 class="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                                <div class="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-3">
+                                                    <i class="fas fa-paperclip"></i>
+                                                    <span>{{ message.attachments.length }} Attachment{{ message.attachments.length > 1 ? 's' : '' }}</span>
+                                                </div>
+                                                <div class="space-y-2">
+                                                    <div 
+                                                        v-for="(attachment, index) in message.attachments" 
+                                                        :key="index"
+                                                        class="flex items-center space-x-3 p-2 bg-white rounded-lg border hover:bg-gray-50 transition-colors"
+                                                    >
+                                                        <div class="text-lg">
+                                                            <i :class="getFileIcon(attachment.mime_type)"></i>
+                                                        </div>
+                                                        <div class="flex-1">
+                                                            <p class="font-medium text-gray-800 text-sm">{{ attachment.original_name }}</p>
+                                                            <p class="text-xs text-gray-500">{{ formatFileSize(attachment.size) }}</p>
+                                                        </div>
+                                                        <button class="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                                            <i class="fas fa-download"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Message Footer -->
+                                        <div class="flex items-center justify-between px-4 pb-4">
+                                            <div class="flex items-center space-x-2">
+                                                <button @click="replyToMessage = message" 
+                                                        class="flex items-center space-x-1 px-3 py-1 text-xs font-medium rounded-lg text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                                                    <i class="fas fa-reply"></i>
+                                                    <span>Reply</span>
+                                                </button>
+                                                <button v-if="!message.is_read && message.sender_type !== currentUserType" 
+                                                        @click="markAsRead([message.id])"
+                                                        class="flex items-center space-x-1 px-3 py-1 text-xs font-medium rounded-lg text-gray-600 hover:text-green-600 hover:bg-green-50 transition-colors">
+                                                    <i class="fas fa-check"></i>
+                                                    <span>Mark Read</span>
+                                                </button>
+                                            </div>
+                                            <div class="text-xs text-gray-500">
+                                                <span class="font-medium">{{ formatMessageType(message.message_type) }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Message Input Area -->
+                    <div class="bg-white border-t p-4">
+                        <!-- Reply Context -->
+                        <div v-if="replyToMessage" 
+                             class="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg mb-3">
+                            <div class="flex items-center space-x-2 text-sm text-blue-800">
+                                <i class="fas fa-reply"></i>
+                                <span>Replying to: {{ truncateMessage(replyToMessage.message, 50) }}</span>
+                            </div>
+                            <button @click="replyToMessage = null" 
+                                    class="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <!-- Input Form -->
+                        <form @submit.prevent="sendMessage" class="space-y-3">
+                            <div class="flex items-end space-x-3">
+                                <!-- File Upload -->
+                                <div class="flex-shrink-0">
+                                    <input
+                                        ref="fileInput"
+                                        type="file"
+                                        multiple
+                                        accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.txt,.xlsx,.xls"
+                                        @change="handleFileUpload"
+                                        class="hidden"
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="$refs.fileInput.click()"
+                                        class="relative p-3 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200"
+                                        :class="{ 'text-blue-600 bg-blue-50 border-blue-200': selectedFiles.length > 0 }"
+                                    >
+                                        <i class="fas fa-paperclip"></i>
+                                        <span v-if="selectedFiles.length > 0" 
+                                              class="absolute -top-2 -right-2 w-5 h-5 bg-blue-600 text-white text-xs rounded-full flex items-center justify-center">
+                                            {{ selectedFiles.length }}
+                                        </span>
+                                    </button>
+                                </div>
+
+                                <!-- Message Input -->
+                                <div class="flex-1">
+                                    <textarea
+                                        v-model="messageText"
+                                        ref="messageInput"
+                                        placeholder="Type your message..."
+                                        class="w-full p-3 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        rows="1"
+                                        :disabled="isSending"
+                                        @keydown.enter.exact.prevent="sendMessage"
+                                        @input="adjustTextareaHeight"
+                                    ></textarea>
+                                </div>
+
+                                <!-- Send Button -->
+                                <button
+                                    type="submit"
+                                    class="flex-shrink-0 p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    :disabled="!canSendMessage || isSending"
+                                >
+                                    <i v-if="isSending" class="fas fa-spinner animate-spin"></i>
+                                    <i v-else class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+
+                            <!-- Selected Files Display -->
+                            <div v-if="selectedFiles.length > 0" 
+                                 class="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-sm font-medium text-gray-700">Selected Files ({{ selectedFiles.length }}/5)</span>
+                                    <button type="button" 
+                                            @click="clearFiles" 
+                                            class="text-xs text-red-600 hover:text-red-800">
+                                        Clear All
+                                    </button>
+                                </div>
+                                <div class="space-y-2">
+                                    <div
+                                        v-for="(file, index) in selectedFiles"
+                                        :key="index"
+                                        class="flex items-center space-x-3 p-2 bg-white rounded border"
+                                    >
+                                        <div class="text-lg">
+                                            <i :class="getFileIcon(file.type)"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <p class="text-sm font-medium text-gray-800">{{ file.name }}</p>
+                                            <p class="text-xs text-gray-500">{{ formatFileSize(file.size) }}</p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            @click="removeFile(index)"
+                                            class="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                        >
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // State
+                const isLoggedIn = ref(false);
+                const isLoggingIn = ref(false);
+                const loginError = ref('');
+                const sessionToken = ref('');
+                const caseId = ref('');
+                const caseToken = ref('');
+                const currentUserType = ref('reporter');
+                
+                const loginForm = ref({
+                    access_id: '',
+                    access_password: ''
+                });
+
+                const messages = ref([]);
+                const messageText = ref('');
+                const selectedFiles = ref([]);
+                const replyToMessage = ref(null);
+                const isLoading = ref(false);
+                const isSending = ref(false);
+
+                // Computed
+                const canSendMessage = computed(() => {
+                    return messageText.value.trim().length > 0 || selectedFiles.value.length > 0;
+                });
+
+                // Methods
+                const login = async () => {
+                    isLoggingIn.value = true;
+                    loginError.value = '';
+                    
+                    try {
+                        const response = await fetch('/api/public/cases/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(loginForm.value)
+                        });
+
+                        const data = await response.json();
+
+                        if (data.status === 'success') {
+                            sessionToken.value = data.data.access_token;
+                            caseId.value = data.data.case_info.case_id;
+                            caseToken.value = data.data.case_info.case_number;
+                            isLoggedIn.value = true;
+                            await loadMessages();
+                        } else {
+                            loginError.value = data.message || 'Login failed';
+                        }
+                    } catch (error) {
+                        loginError.value = 'Network error. Please try again.';
+                        console.error('Login error:', error);
+                    } finally {
+                        isLoggingIn.value = false;
+                    }
+                };
+
+                const loadMessages = async () => {
+                    isLoading.value = true;
+                    
+                    try {
+                        const response = await fetch(`/api/public/cases/${caseId.value}/messages`, {
+                            headers: {
+                                'Authorization': `Bearer ${sessionToken.value}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        const data = await response.json();
+                        
+                        if (data.status === 'success') {
+                            messages.value = data.data || [];
+                        }
+                    } catch (error) {
+                        console.error('Error loading messages:', error);
+                    } finally {
+                        isLoading.value = false;
+                    }
+                };
+
+                const sendMessage = async () => {
+                    if (!canSendMessage.value || isSending.value) return;
+
+                    isSending.value = true;
+
+                    try {
+                        const formData = new FormData();
+                        formData.append('message', messageText.value.trim());
+
+                        if (replyToMessage.value) {
+                            formData.append('parent_message_id', replyToMessage.value.id);
+                        }
+
+                        selectedFiles.value.forEach(file => {
+                            formData.append('attachments[]', file);
+                        });
+
+                        const response = await fetch(`/api/public/cases/${caseId.value}/messages`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${sessionToken.value}`
+                            },
+                            body: formData
+                        });
+
+                        if (response.ok) {
+                            messageText.value = '';
+                            selectedFiles.value = [];
+                            replyToMessage.value = null;
+                            await loadMessages();
+                        }
+                    } catch (error) {
+                        console.error('Error sending message:', error);
+                    } finally {
+                        isSending.value = false;
+                    }
+                };
+
+                const refreshMessages = () => {
+                    loadMessages();
+                };
+
+                const markAsRead = async (messageIds) => {
+                    try {
+                        const response = await fetch(`/api/public/cases/${caseId.value}/messages/read`, {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${sessionToken.value}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ message_ids: messageIds })
+                        });
+
+                        if (response.ok) {
+                            await loadMessages();
+                        }
+                    } catch (error) {
+                        console.error('Error marking messages as read:', error);
+                    }
+                };
+
+                const handleFileUpload = (event) => {
+                    const files = Array.from(event.target.files);
+                    const maxFiles = 5;
+                    
+                    if (selectedFiles.value.length + files.length > maxFiles) {
+                        alert(`You can only select up to ${maxFiles} files.`);
+                        return;
+                    }
+
+                    selectedFiles.value.push(...files);
+                };
+
+                const removeFile = (index) => {
+                    selectedFiles.value.splice(index, 1);
+                };
+
+                const clearFiles = () => {
+                    selectedFiles.value = [];
+                };
+
+                const adjustTextareaHeight = (event) => {
+                    const textarea = event.target;
+                    textarea.style.height = 'auto';
+                    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+                };
+
+                const logout = () => {
+                    isLoggedIn.value = false;
+                    sessionToken.value = '';
+                    caseId.value = '';
+                    caseToken.value = '';
+                    messages.value = [];
+                    loginForm.value = { access_id: '', access_password: '' };
+                };
+
+                // Utility methods
+                const formatTime = (timestamp) => {
+                    const date = new Date(timestamp);
+                    const now = new Date();
+                    const diffInHours = Math.abs(now - date) / 36e5;
+
+                    if (diffInHours < 24) {
+                        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    } else if (diffInHours < 168) {
+                        return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+                    } else {
+                        return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    }
+                };
+
+                const formatDateTime = (date) => {
+                    return date.toLocaleDateString([], { 
+                        weekday: 'short', 
+                        year: 'numeric', 
+                        month: 'short', 
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                };
+
+                const formatFileSize = (bytes) => {
+                    if (bytes === 0) return '0 Bytes';
+                    const k = 1024;
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                };
+
+                const formatMessageType = (type) => {
+                    const types = {
+                        'comment': 'Comment',
+                        'update': 'Update',
+                        'notification': 'Notification',
+                        'status_change': 'Status Change',
+                        'assignment': 'Assignment'
+                    };
+                    return types[type] || 'Message';
+                };
+
+                const truncateMessage = (message, maxLength) => {
+                    if (message.length <= maxLength) return message;
+                    return message.substring(0, maxLength) + '...';
+                };
+
+                const getFileIcon = (mimeType) => {
+                    if (mimeType.includes('image/')) return 'fas fa-image text-blue-500';
+                    if (mimeType.includes('pdf')) return 'fas fa-file-pdf text-red-500';
+                    if (mimeType.includes('word')) return 'fas fa-file-word text-blue-600';
+                    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fas fa-file-excel text-green-600';
+                    if (mimeType.includes('text/')) return 'fas fa-file-alt text-gray-600';
+                    return 'fas fa-file text-gray-500';
+                };
+
+                const getSenderName = (message) => {
+                    switch (message.sender_type) {
+                        case 'reporter':
+                            return currentUserType.value === 'reporter' ? 'You' : 'Case Reporter';
+                        case 'investigator':
+                            return message.metadata?.sender_name || 'Investigator';
+                        case 'system':
+                            return 'System';
+                        default:
+                            return 'Unknown';
+                    }
+                };
+
+                const getSenderIcon = (message) => {
+                    switch (message.sender_type) {
+                        case 'reporter':
+                            return 'fas fa-user';
+                        case 'investigator':
+                            return 'fas fa-user-tie';
+                        case 'system':
+                            return 'fas fa-cog';
+                        default:
+                            return 'fas fa-user';
+                    }
+                };
+
+                const getMessageAlignment = (message) => {
+                    return message.sender_type === currentUserType.value ? 'flex justify-end' : 'flex justify-start';
+                };
+
+                const getMessageCardClass = (message) => {
+                    const classes = [];
+                    
+                    if (message.sender_type === 'reporter') {
+                        classes.push('border-blue-200 bg-gradient-to-br from-blue-50 to-white');
+                    } else if (message.sender_type === 'investigator') {
+                        classes.push('border-green-200 bg-gradient-to-br from-green-50 to-white');
+                    } else {
+                        classes.push('border-gray-200 bg-gradient-to-br from-gray-50 to-white');
+                    }
+
+                    if (message.priority === 'high' || message.priority === 'urgent') {
+                        classes.push('border-red-300 bg-gradient-to-br from-red-50 to-white');
+                    }
+
+                    if (!message.is_read && message.sender_type !== currentUserType.value) {
+                        classes.push('border-l-4 border-l-blue-500');
+                    }
+
+                    return classes.join(' ');
+                };
+
+                const getAvatarClass = (message) => {
+                    switch (message.sender_type) {
+                        case 'reporter':
+                            return 'bg-gradient-to-br from-blue-500 to-blue-600';
+                        case 'investigator':
+                            return 'bg-gradient-to-br from-green-500 to-green-600';
+                        case 'system':
+                            return 'bg-gradient-to-br from-gray-500 to-gray-600';
+                        default:
+                            return 'bg-gradient-to-br from-gray-500 to-gray-600';
+                    }
+                };
+
+                const getPriorityClass = (priority) => {
+                    switch (priority) {
+                        case 'high':
+                            return 'bg-orange-100 text-orange-800';
+                        case 'urgent':
+                            return 'bg-red-100 text-red-800';
+                        default:
+                            return 'bg-gray-100 text-gray-800';
+                    }
+                };
+
+                return {
+                    // State
+                    isLoggedIn,
+                    isLoggingIn,
+                    loginError,
+                    sessionToken,
+                    caseId,
+                    caseToken,
+                    currentUserType,
+                    loginForm,
+                    messages,
+                    messageText,
+                    selectedFiles,
+                    replyToMessage,
+                    isLoading,
+                    isSending,
+                    
+                    // Computed
+                    canSendMessage,
+                    
+                    // Methods
+                    login,
+                    loadMessages,
+                    sendMessage,
+                    refreshMessages,
+                    markAsRead,
+                    handleFileUpload,
+                    removeFile,
+                    clearFiles,
+                    adjustTextareaHeight,
+                    logout,
+                    
+                    // Utility methods
+                    formatTime,
+                    formatDateTime,
+                    formatFileSize,
+                    formatMessageType,
+                    truncateMessage,
+                    getFileIcon,
+                    getSenderName,
+                    getSenderIcon,
+                    getMessageAlignment,
+                    getMessageCardClass,
+                    getAvatarClass,
+                    getPriorityClass
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

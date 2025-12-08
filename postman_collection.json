@@ -1,0 +1,218 @@
+{
+  "info": {
+    "name": "SafeVoice Case Messaging API",
+    "description": "Complete API testing collection for SafeVoice case messaging system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost/safevoicebackend/public/api",
+      "type": "string"
+    },
+    {
+      "key": "session_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "case_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Case Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (responseCode.code === 200) {",
+              "    const jsonData = pm.response.json();",
+              "    pm.collectionVariables.set('session_token', jsonData.data.access_token);",
+              "    pm.collectionVariables.set('case_id', jsonData.data.case_info.case_id);",
+              "    console.log('Session token saved:', jsonData.data.access_token);",
+              "    console.log('Case ID saved:', jsonData.data.case_info.case_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"access_id\": \"your_case_access_id\",\n  \"access_password\": \"your_case_password\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/public/cases/login",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "login"]
+        }
+      }
+    },
+    {
+      "name": "2. Get Case Details",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/public/cases/details",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "details"]
+        }
+      }
+    },
+    {
+      "name": "3. Get Messages",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/public/cases/{{case_id}}/messages?page=1&per_page=20",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "{{case_id}}", "messages"],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "per_page",
+              "value": "20"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Send Text Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Hello, I have an update regarding my case. Please let me know if you need any additional information.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/public/cases/{{case_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "{{case_id}}", "messages"]
+        }
+      }
+    },
+    {
+      "name": "5. Send Message with Attachment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "message",
+              "value": "Here is the evidence file you requested.",
+              "type": "text"
+            },
+            {
+              "key": "attachments[]",
+              "type": "file",
+              "src": "/path/to/your/file.pdf"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/public/cases/{{case_id}}/messages",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "{{case_id}}", "messages"]
+        }
+      }
+    },
+    {
+      "name": "6. Mark Messages as Read",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message_ids\": [\"message_id_1\", \"message_id_2\"]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/public/cases/{{case_id}}/messages/read",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "{{case_id}}", "messages", "read"]
+        }
+      }
+    },
+    {
+      "name": "7. Logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Session-Token",
+            "value": "{{session_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/public/cases/logout",
+          "host": ["{{base_url}}"],
+          "path": ["public", "cases", "logout"]
+        }
+      }
+    }
+  ]
+}

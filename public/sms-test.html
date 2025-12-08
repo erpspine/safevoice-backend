@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeVoice SMS Testing API</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .api-section {
+            margin-bottom: 30px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        
+        .api-section h3 {
+            color: #495057;
+            margin-top: 0;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        input, textarea, button {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        input:focus, textarea:focus {
+            border-color: #007bff;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.25);
+        }
+        
+        button {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,123,255,0.3);
+        }
+        
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .response {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .response.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .response.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+        
+        .status-badge.online {
+            background: #28a745;
+        }
+        
+        .status-badge.offline {
+            background: #dc3545;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 10px 0;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 SafeVoice SMS Testing API</h1>
+        
+        <!-- Service Status -->
+        <div class="api-section">
+            <h3>📊 Service Status</h3>
+            <button onclick="checkStatus()">Check SMS Service Status</button>
+            <div class="loading" id="status-loading">
+                <div class="spinner"></div>
+                Checking status...
+            </div>
+            <div id="status-response" class="response" style="display: none;"></div>
+        </div>
+        
+        <div class="grid">
+            <!-- Send Single SMS -->
+            <div class="api-section">
+                <h3>📤 Send Single SMS</h3>
+                <form onsubmit="sendSingleSMS(event)">
+                    <div class="form-group">
+                        <label>Phone Number:</label>
+                        <input type="text" id="single-phone" placeholder="0760299974" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Message:</label>
+                        <textarea id="single-message" rows="3" placeholder="Your test message here..." required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Reference (Optional):</label>
+                        <input type="text" id="single-reference" placeholder="TEST_001">
+                    </div>
+                    <button type="submit">Send SMS</button>
+                </form>
+                <div class="loading" id="single-loading">
+                    <div class="spinner"></div>
+                    Sending SMS...
+                </div>
+                <div id="single-response" class="response" style="display: none;"></div>
+            </div>
+            
+            <!-- Send Invitation SMS -->
+            <div class="api-section">
+                <h3>💌 Send Invitation SMS</h3>
+                <form onsubmit="sendInvitationSMS(event)">
+                    <div class="form-group">
+                        <label>Phone Number:</label>
+                        <input type="text" id="invite-phone" placeholder="0760299974" required>
+                    </div>
+                    <div class="form-group">
+                        <label>User Name:</label>
+                        <input type="text" id="invite-name" placeholder="John Doe" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Company Name:</label>
+                        <input type="text" id="invite-company" placeholder="SafeVoice Demo" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Invitation Link:</label>
+                        <input type="url" id="invite-link" placeholder="https://app.safevoice.tz/accept-invitation?token=abc123" required>
+                    </div>
+                    <button type="submit">Send Invitation</button>
+                </form>
+                <div class="loading" id="invite-loading">
+                    <div class="spinner"></div>
+                    Sending invitation...
+                </div>
+                <div id="invite-response" class="response" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- Send Verification SMS -->
+            <div class="api-section">
+                <h3>🔐 Send Verification SMS</h3>
+                <form onsubmit="sendVerificationSMS(event)">
+                    <div class="form-group">
+                        <label>Phone Number:</label>
+                        <input type="text" id="verify-phone" placeholder="0760299974" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Verification Code:</label>
+                        <input type="text" id="verify-code" placeholder="123456" required>
+                    </div>
+                    <button type="submit">Send Verification Code</button>
+                </form>
+                <div class="loading" id="verify-loading">
+                    <div class="spinner"></div>
+                    Sending verification...
+                </div>
+                <div id="verify-response" class="response" style="display: none;"></div>
+            </div>
+            
+            <!-- Validate Phone Number -->
+            <div class="api-section">
+                <h3>✅ Validate Phone Number</h3>
+                <form onsubmit="validatePhone(event)">
+                    <div class="form-group">
+                        <label>Phone Number:</label>
+                        <input type="text" id="validate-phone" placeholder="0760299974" required>
+                    </div>
+                    <button type="submit">Validate Number</button>
+                </form>
+                <div class="loading" id="validate-loading">
+                    <div class="spinner"></div>
+                    Validating...
+                </div>
+                <div id="validate-response" class="response" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <!-- Send Multiple SMS -->
+        <div class="api-section">
+            <h3>📤 Send Multiple SMS</h3>
+            <form onsubmit="sendMultipleSMS(event)">
+                <div class="form-group">
+                    <label>Phone Numbers (one per line, max 10):</label>
+                    <textarea id="multiple-phones" rows="4" placeholder="0760299974&#10;0750123456&#10;0740987654" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Message:</label>
+                    <textarea id="multiple-message" rows="3" placeholder="Your broadcast message here..." required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Reference (Optional):</label>
+                    <input type="text" id="multiple-reference" placeholder="BROADCAST_001">
+                </div>
+                <button type="submit">Send to All Numbers</button>
+            </form>
+            <div class="loading" id="multiple-loading">
+                <div class="spinner"></div>
+                Sending to multiple recipients...
+            </div>
+            <div id="multiple-response" class="response" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/sms/test';
+        
+        async function makeRequest(endpoint, options = {}) {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+            
+            return {
+                data: await response.json(),
+                status: response.status
+            };
+        }
+        
+        function showLoading(id) {
+            document.getElementById(id + '-loading').style.display = 'block';
+            document.getElementById(id + '-response').style.display = 'none';
+        }
+        
+        function hideLoading(id) {
+            document.getElementById(id + '-loading').style.display = 'none';
+        }
+        
+        function showResponse(id, data, isSuccess) {
+            const responseEl = document.getElementById(id + '-response');
+            responseEl.textContent = JSON.stringify(data, null, 2);
+            responseEl.className = `response ${isSuccess ? 'success' : 'error'}`;
+            responseEl.style.display = 'block';
+        }
+        
+        async function checkStatus() {
+            showLoading('status');
+            try {
+                const result = await makeRequest('/status');
+                hideLoading('status');
+                showResponse('status', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('status');
+                showResponse('status', { error: error.message }, false);
+            }
+        }
+        
+        async function sendSingleSMS(event) {
+            event.preventDefault();
+            showLoading('single');
+            
+            try {
+                const data = {
+                    phone_number: document.getElementById('single-phone').value,
+                    message: document.getElementById('single-message').value,
+                    reference: document.getElementById('single-reference').value || undefined
+                };
+                
+                const result = await makeRequest('/send-single', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                hideLoading('single');
+                showResponse('single', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('single');
+                showResponse('single', { error: error.message }, false);
+            }
+        }
+        
+        async function sendInvitationSMS(event) {
+            event.preventDefault();
+            showLoading('invite');
+            
+            try {
+                const data = {
+                    phone_number: document.getElementById('invite-phone').value,
+                    user_name: document.getElementById('invite-name').value,
+                    company_name: document.getElementById('invite-company').value,
+                    invitation_link: document.getElementById('invite-link').value
+                };
+                
+                const result = await makeRequest('/send-invitation', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                hideLoading('invite');
+                showResponse('invite', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('invite');
+                showResponse('invite', { error: error.message }, false);
+            }
+        }
+        
+        async function sendVerificationSMS(event) {
+            event.preventDefault();
+            showLoading('verify');
+            
+            try {
+                const data = {
+                    phone_number: document.getElementById('verify-phone').value,
+                    verification_code: document.getElementById('verify-code').value
+                };
+                
+                const result = await makeRequest('/send-verification', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                hideLoading('verify');
+                showResponse('verify', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('verify');
+                showResponse('verify', { error: error.message }, false);
+            }
+        }
+        
+        async function validatePhone(event) {
+            event.preventDefault();
+            showLoading('validate');
+            
+            try {
+                const data = {
+                    phone_number: document.getElementById('validate-phone').value
+                };
+                
+                const result = await makeRequest('/validate-phone', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                hideLoading('validate');
+                showResponse('validate', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('validate');
+                showResponse('validate', { error: error.message }, false);
+            }
+        }
+        
+        async function sendMultipleSMS(event) {
+            event.preventDefault();
+            showLoading('multiple');
+            
+            try {
+                const phoneNumbers = document.getElementById('multiple-phones').value
+                    .split('\n')
+                    .map(phone => phone.trim())
+                    .filter(phone => phone.length > 0);
+                
+                const data = {
+                    phone_numbers: phoneNumbers,
+                    message: document.getElementById('multiple-message').value,
+                    reference: document.getElementById('multiple-reference').value || undefined
+                };
+                
+                const result = await makeRequest('/send-multiple', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                hideLoading('multiple');
+                showResponse('multiple', result.data, result.data.success);
+            } catch (error) {
+                hideLoading('multiple');
+                showResponse('multiple', { error: error.message }, false);
+            }
+        }
+        
+        // Auto-check status on page load
+        window.addEventListener('load', checkStatus);
+    </script>
+</body>
+</html>

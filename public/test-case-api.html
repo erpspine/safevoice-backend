@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Case Submission API Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 100px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button.secondary {
+            background: #6c757d;
+        }
+        button.secondary:hover {
+            background: #545b62;
+        }
+        .response {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            border-left: 4px solid #007bff;
+        }
+        .error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            color: #155724;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Case Submission API Test</h1>
+    
+    <div class="info">
+        <strong>API Endpoint:</strong> http://localhost:8000/api/public/cases/submit<br>
+        <strong>Test Endpoint:</strong> http://localhost:8000/api/public/cases/test-payload<br>
+        <strong>Method:</strong> POST<br>
+        <strong>Content-Type:</strong> application/json (without files) or multipart/form-data (with files)
+    </div>
+
+    <div class="container">
+        <h2>1. Test Payload Structure</h2>
+        <p>First, test if the payload is received correctly by the server.</p>
+        <button onclick="testPayload()">Test Payload</button>
+        <div id="testResult"></div>
+    </div>
+
+    <div class="container">
+        <h2>2. Submit Case (Without Files)</h2>
+        
+        <div class="form-group">
+            <label>Company ID *</label>
+            <input type="text" id="company_id" placeholder="Enter company ID" value="">
+        </div>
+
+        <div class="form-group">
+            <label>Branch ID (Optional)</label>
+            <input type="text" id="branch_id" placeholder="Enter branch ID (optional)">
+        </div>
+
+        <div class="form-group">
+            <label>Description *</label>
+            <textarea id="description" placeholder="Describe the incident...">Test incident description - This is a test case submission to verify the API is working correctly.</textarea>
+        </div>
+
+        <div class="form-group">
+            <label>Location Description</label>
+            <input type="text" id="location_description" placeholder="e.g., Office Building, 3rd Floor" value="Office Building, 3rd Floor">
+        </div>
+
+        <div class="form-group">
+            <label>Date/Time Type *</label>
+            <select id="date_time_type">
+                <option value="specific">Specific Date/Time</option>
+                <option value="general">General Timeframe</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Date Occurred</label>
+            <input type="date" id="date_occurred" value="2025-11-15">
+        </div>
+
+        <div class="form-group">
+            <label>Time Occurred</label>
+            <input type="time" id="time_occurred" value="14:30">
+        </div>
+
+        <div class="form-group">
+            <label>Company Relationship *</label>
+            <select id="company_relationship">
+                <option value="employee">Employee</option>
+                <option value="contractor">Contractor</option>
+                <option value="vendor">Vendor</option>
+                <option value="customer">Customer</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+
+        <h3>Contact Information</h3>
+        <div class="form-group">
+            <label>Is Anonymous?</label>
+            <input type="checkbox" id="is_anonymous" style="width: auto;">
+        </div>
+
+        <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="contact_name" value="John Doe">
+        </div>
+
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="contact_email" value="john.doe@example.com">
+        </div>
+
+        <div class="form-group">
+            <label>Phone</label>
+            <input type="tel" id="contact_phone" value="+255123456789">
+        </div>
+
+        <h3>Access Credentials</h3>
+        <div class="form-group">
+            <label>Access ID * (Unique)</label>
+            <input type="text" id="access_id" value="" placeholder="e.g., TEST-CASE-2025-001">
+        </div>
+
+        <div class="form-group">
+            <label>Access Password * (Min 6 characters)</label>
+            <input type="password" id="access_password" value="" placeholder="Enter a secure password">
+        </div>
+
+        <button onclick="submitCase()">Submit Case</button>
+        <button class="secondary" onclick="generateAccessId()">Generate Access ID</button>
+        
+        <div id="submitResult"></div>
+    </div>
+
+    <div class="container">
+        <h2>3. Track Case</h2>
+        
+        <div class="form-group">
+            <label>Access ID</label>
+            <input type="text" id="track_access_id" placeholder="Enter access ID">
+        </div>
+
+        <div class="form-group">
+            <label>Access Password</label>
+            <input type="password" id="track_password" placeholder="Enter password">
+        </div>
+
+        <button onclick="trackCase()">Track Case</button>
+        
+        <div id="trackResult"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/public';
+
+        // Generate random access ID
+        function generateAccessId() {
+            const timestamp = Date.now();
+            const random = Math.floor(Math.random() * 1000);
+            const accessId = `TEST-CASE-${timestamp}-${random}`;
+            document.getElementById('access_id').value = accessId;
+        }
+
+        // Test payload structure
+        async function testPayload() {
+            const resultDiv = document.getElementById('testResult');
+            resultDiv.innerHTML = '<p>Testing payload...</p>';
+
+            const payload = buildPayload();
+
+            try {
+                const response = await axios.post(`${API_URL}/cases/test-payload`, payload, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                resultDiv.innerHTML = `
+                    <div class="response success">
+                        <h3>✅ Success!</h3>
+                        <p><strong>Message:</strong> ${response.data.message}</p>
+                        <p><strong>Payload Preview:</strong></p>
+                        <pre>${JSON.stringify(response.data.data, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                handleError(error, resultDiv);
+            }
+        }
+
+        // Build payload from form
+        function buildPayload() {
+            const isAnonymous = document.getElementById('is_anonymous').checked;
+
+            return {
+                company_id: document.getElementById('company_id').value,
+                branch_id: document.getElementById('branch_id').value || null,
+                description: document.getElementById('description').value,
+                location_description: document.getElementById('location_description').value || null,
+                date_time_type: document.getElementById('date_time_type').value,
+                date_occurred: document.getElementById('date_occurred').value || null,
+                time_occurred: document.getElementById('time_occurred').value || null,
+                general_timeframe: null,
+                company_relationship: document.getElementById('company_relationship').value,
+                contact_info: {
+                    name: isAnonymous ? null : document.getElementById('contact_name').value,
+                    email: isAnonymous ? null : document.getElementById('contact_email').value,
+                    phone: isAnonymous ? null : document.getElementById('contact_phone').value,
+                    is_anonymous: isAnonymous
+                },
+                involved_parties: [],
+                additional_parties: [],
+                access_id: document.getElementById('access_id').value,
+                access_password: document.getElementById('access_password').value
+            };
+        }
+
+        // Submit case
+        async function submitCase() {
+            const resultDiv = document.getElementById('submitResult');
+            resultDiv.innerHTML = '<p>Submitting case...</p>';
+
+            const payload = buildPayload();
+
+            // Validation
+            if (!payload.company_id) {
+                resultDiv.innerHTML = '<div class="response error"><strong>Error:</strong> Company ID is required!</div>';
+                return;
+            }
+
+            if (!payload.access_id) {
+                resultDiv.innerHTML = '<div class="response error"><strong>Error:</strong> Access ID is required!</div>';
+                return;
+            }
+
+            try {
+                const response = await axios.post(`${API_URL}/cases/submit`, payload, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                resultDiv.innerHTML = `
+                    <div class="response success">
+                        <h3>✅ Case Submitted Successfully!</h3>
+                        <p><strong>Case ID:</strong> ${response.data.data.case_id}</p>
+                        <p><strong>Case Number:</strong> ${response.data.data.case_number}</p>
+                        <p><strong>Access ID:</strong> ${response.data.data.access_id}</p>
+                        <p><strong>Status:</strong> ${response.data.data.status}</p>
+                        <p><strong>Submitted At:</strong> ${response.data.data.submitted_at}</p>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>
+                    </div>
+                `;
+
+                // Auto-fill tracking form
+                document.getElementById('track_access_id').value = response.data.data.access_id;
+                document.getElementById('track_password').value = document.getElementById('access_password').value;
+            } catch (error) {
+                handleError(error, resultDiv);
+            }
+        }
+
+        // Track case
+        async function trackCase() {
+            const resultDiv = document.getElementById('trackResult');
+            resultDiv.innerHTML = '<p>Tracking case...</p>';
+
+            const payload = {
+                access_id: document.getElementById('track_access_id').value,
+                access_password: document.getElementById('track_password').value
+            };
+
+            try {
+                const response = await axios.post(`${API_URL}/cases/track`, payload, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                resultDiv.innerHTML = `
+                    <div class="response success">
+                        <h3>✅ Case Found!</h3>
+                        <p><strong>Case Number:</strong> ${response.data.data.case_number}</p>
+                        <p><strong>Status:</strong> ${response.data.data.status}</p>
+                        <p><strong>Description:</strong> ${response.data.data.description}</p>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                handleError(error, resultDiv);
+            }
+        }
+
+        // Handle errors
+        function handleError(error, resultDiv) {
+            if (error.response) {
+                const data = error.response.data;
+                let errorHtml = `
+                    <div class="response error">
+                        <h3>❌ Error ${error.response.status}</h3>
+                        <p><strong>Message:</strong> ${data.message || 'An error occurred'}</p>
+                `;
+
+                if (data.errors) {
+                    errorHtml += '<p><strong>Validation Errors:</strong></p><ul>';
+                    for (const [field, messages] of Object.entries(data.errors)) {
+                        errorHtml += `<li><strong>${field}:</strong> ${messages.join(', ')}</li>`;
+                    }
+                    errorHtml += '</ul>';
+                }
+
+                errorHtml += `<pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                resultDiv.innerHTML = errorHtml;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="response error">
+                        <h3>❌ Network Error</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Generate access ID on page load
+        window.onload = function() {
+            generateAccessId();
+        };
+    </script>
+</body>
+</html>
