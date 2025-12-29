@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Investigator;
 
 use App\Http\Controllers\Controller;
+use App\Models\CaseAssignment;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -26,7 +27,6 @@ class InvestigatorAuthController extends Controller
             $user = User::where('email', $request->email)
                 ->where('role', 'investigator')
                 ->where('status', 'active')
-                ->with(['investigatorAssignments.company', 'investigatorAssignments.company.branches'])
                 ->first();
 
             if (!$user || !Hash::check($request->password, $user->password)) {
@@ -63,15 +63,28 @@ class InvestigatorAuthController extends Controller
             // Update last login
             $user->update(['last_login' => now()]);
 
-            // Get assigned companies
-            $assignedCompanies = $user->investigatorAssignments->map(function ($assignment) {
-                return [
-                    'id' => $assignment->company->id,
-                    'name' => $assignment->company->name,
-                    'logo' => $assignment->company->logo,
-                    'branches_count' => $assignment->company->branches->count(),
-                ];
-            });
+            // Get assigned cases with company information
+            $assignments = CaseAssignment::where('investigator_id', $user->id)
+                ->where('status', 'active')
+                ->with(['case.company:id,name,logo', 'case.branch:id,name'])
+                ->get();
+
+            // Get unique companies from assignments
+            $assignedCompanies = $assignments->pluck('case.company')
+                ->unique('id')
+                ->filter()
+                ->map(function ($company) use ($assignments) {
+                    $companyAssignments = $assignments->filter(function ($assignment) use ($company) {
+                        return $assignment->case && $assignment->case->company_id === $company->id;
+                    });
+
+                    return [
+                        'id' => $company->id,
+                        'name' => $company->name,
+                        'logo' => $company->logo,
+                        'active_cases_count' => $companyAssignments->count(),
+                    ];
+                })->values();
 
             Log::info('Successful investigator login', [
                 'user_id' => $user->id,
@@ -113,6 +126,7 @@ class InvestigatorAuthController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'An error occurred during login',
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -124,37 +138,48 @@ class InvestigatorAuthController extends Controller
     {
         try {
             $user = $request->user()->load([
-                'investigatorAssignments.company:id,name,logo',
-                'investigatorAssignments.company.branches:id,company_id,name'
+                'investigatorAssignments.case.company:id,name,logo',
+                'investigatorAssignments.case.branch:id,company_id,name'
             ]);
 
             // Get case statistics
             $caseStats = [
-                'assigned_cases' => $user->investigatorCaseAssignments()->count(),
-                'active_cases' => $user->investigatorCaseAssignments()
+                'assigned_cases' => $user->investigatorAssignments()->count(),
+                'active_cases' => $user->investigatorAssignments()
                     ->whereHas('case', function ($q) {
                         $q->whereIn('status', ['open', 'in_progress', 'under_investigation']);
                     })->count(),
-                'closed_cases' => $user->investigatorCaseAssignments()
+                'closed_cases' => $user->investigatorAssignments()
                     ->whereHas('case', function ($q) {
                         $q->where('status', 'closed');
                     })->count(),
             ];
 
-            // Get assigned companies
-            $assignedCompanies = $user->investigatorAssignments->map(function ($assignment) {
-                return [
-                    'id' => $assignment->company->id,
-                    'name' => $assignment->company->name,
-                    'logo' => $assignment->company->logo,
-                    'branches' => $assignment->company->branches->map(function ($branch) {
-                        return [
-                            'id' => $branch->id,
-                            'name' => $branch->name,
-                        ];
-                    }),
-                ];
-            });
+            // Get assigned companies from case assignments
+            $assignedCompanies = $user->investigatorAssignments
+                ->pluck('case.company')
+                ->unique('id')
+                ->filter()
+                ->map(function ($company) use ($user) {
+                    $branches = $user->investigatorAssignments
+                        ->where('case.company_id', $company->id)
+                        ->pluck('case.branch')
+                        ->unique('id')
+                        ->filter()
+                        ->values();
+
+                    return [
+                        'id' => $company->id,
+                        'name' => $company->name,
+                        'logo' => $company->logo,
+                        'branches' => $branches->map(function ($branch) {
+                            return [
+                                'id' => $branch->id,
+                                'name' => $branch->name,
+                            ];
+                        })->values(),
+                    ];
+                })->values();
 
             return response()->json([
                 'status' => 'success',

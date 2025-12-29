@@ -38,6 +38,13 @@ use App\Http\Controllers\Api\Admin\InvestigatorAssignmentController;
 use App\Http\Controllers\Api\Company\CompanyFeedbackCategoryController;
 use App\Http\Controllers\Api\Company\CompanyIncidentCategoryController;
 use App\Http\Controllers\Api\Admin\InvestigatorCompanyAssignmentController;
+use App\Http\Controllers\Api\CaseResolutionController;
+use App\Http\Controllers\Api\DepartmentalCaseDistributionController;
+use App\Http\Controllers\Api\CategoryCaseDistributionController;
+use App\Http\Controllers\Api\InvestigatorAllocationController;
+
+// Admin Controllers
+use App\Http\Controllers\Api\Admin\AdminDashboardController;
 
 // Investigator Controllers
 use App\Http\Controllers\Api\Investigator\InvestigatorAuthController;
@@ -188,6 +195,9 @@ Route::prefix('company/auth')->group(function () {
 
 // Admin Management Routes (Protected)
 Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
+
+    // Dashboard
+    Route::get('dashboard', [AdminDashboardController::class, 'dashboard'])->name('admin.dashboard');
 
     // Company Management
     Route::apiResource('companies', CompanyController::class);
@@ -382,6 +392,24 @@ Route::middleware(['auth:sanctum'])->prefix('branch')->group(function () {
     Route::get('cases/{id}/thread-activity', [BranchCaseController::class, 'getCaseThreadActivity'])->name('branch.cases.thread-activity');
     Route::put('cases/{id}', [BranchCaseController::class, 'update'])->name('branch.cases.update');
 
+    // Case Department Assignment (Branch)
+    Route::post('cases/{id}/departments', [BranchCaseController::class, 'assignDepartments'])->name('branch.cases.assign-departments');
+    Route::get('cases/{id}/departments', [BranchCaseController::class, 'getCaseDepartments'])->name('branch.cases.departments');
+    Route::delete('cases/{id}/departments/{departmentId}', [BranchCaseController::class, 'unassignDepartment'])->name('branch.cases.unassign-department');
+
+    // Case Category Assignment (Branch)
+    Route::post('cases/{id}/categories', [BranchCaseController::class, 'assignCategories'])->name('branch.cases.assign-categories');
+    Route::get('cases/{id}/categories', [BranchCaseController::class, 'getCaseCategories'])->name('branch.cases.categories');
+    Route::delete('cases/{id}/categories/{categoryId}', [BranchCaseController::class, 'unassignCategory'])->name('branch.cases.unassign-category');
+
+    // Case Investigator Assignment (Branch)
+    Route::post('cases/{id}/investigators', [BranchCaseController::class, 'assignInvestigators'])->name('branch.cases.assign-investigators');
+    Route::get('cases/{id}/investigators', [BranchCaseController::class, 'getCaseInvestigators'])->name('branch.cases.investigators');
+    Route::delete('cases/{id}/investigators/{assignmentId}', [BranchCaseController::class, 'unassignInvestigator'])->name('branch.cases.unassign-investigator');
+
+    // Case Files (Branch)
+    Route::get('cases/{id}/files', [BranchCaseController::class, 'getCaseFiles'])->name('branch.cases.files');
+
     // Branch Incident Category Management (Branch admins can manage company incident categories)
     Route::apiResource('incident-categories', BranchIncidentCategoryController::class)->names([
         'index' => 'branch.incident-categories.index',
@@ -513,6 +541,7 @@ Route::middleware(['auth:sanctum'])->prefix('investigator')->group(function () {
 
     // Case Management
     Route::get('cases', [InvestigatorCaseController::class, 'index'])->name('investigator.cases.index');
+    Route::get('cases/with-threads', [InvestigatorCaseController::class, 'getCasesWithThreads'])->name('investigator.cases.with-threads');
     Route::get('cases/{caseId}', [InvestigatorCaseController::class, 'show'])->name('investigator.cases.show');
     Route::put('cases/{caseId}', [InvestigatorCaseController::class, 'updateCase'])->name('investigator.cases.update');
     Route::get('cases/{caseId}/files/{fileId}/download', [InvestigatorCaseController::class, 'downloadFile'])->name('investigator.cases.files.download');
@@ -526,4 +555,35 @@ Route::middleware(['auth:sanctum'])->prefix('investigator')->group(function () {
         Route::post('/{threadId}/mark-read', [InvestigatorThreadController::class, 'markAsRead'])->name('investigator.threads.mark-read');
         Route::get('/{threadId}/messages/{messageId}/attachments/{filename}', [InvestigatorThreadController::class, 'downloadAttachment'])->name('investigator.threads.messages.download');
     });
+});
+
+// Case Resolution Time Analytics - Available for all authenticated users
+Route::middleware(['auth:sanctum'])->prefix('case-resolution')->group(function () {
+    Route::get('/analytics', [CaseResolutionController::class, 'getResolutionAnalytics'])->name('case.resolution.analytics');
+    Route::get('/trends', [CaseResolutionController::class, 'getResolutionTrends'])->name('case.resolution.trends');
+    Route::get('/export', [CaseResolutionController::class, 'exportResolutionData'])->name('case.resolution.export');
+});
+
+// Departmental Case Distribution Analytics - Available for all authenticated users
+Route::middleware(['auth:sanctum'])->prefix('case-distribution')->group(function () {
+    Route::get('/analytics', [DepartmentalCaseDistributionController::class, 'getDistributionAnalytics'])->name('case.distribution.analytics');
+    Route::get('/trends', [DepartmentalCaseDistributionController::class, 'getDistributionTrends'])->name('case.distribution.trends');
+    Route::get('/export', [DepartmentalCaseDistributionController::class, 'exportDistributionData'])->name('case.distribution.export');
+    Route::get('/filters', [DepartmentalCaseDistributionController::class, 'getFilters'])->name('case.distribution.filters');
+});
+
+// Category Case Distribution Analytics - Available for all authenticated users
+Route::middleware(['auth:sanctum'])->prefix('category-distribution')->group(function () {
+    Route::get('/analytics', [CategoryCaseDistributionController::class, 'getCategoryAnalytics'])->name('category.distribution.analytics');
+    Route::get('/trends', [CategoryCaseDistributionController::class, 'getCategoryTrends'])->name('category.distribution.trends');
+    Route::get('/export', [CategoryCaseDistributionController::class, 'exportCategoryData'])->name('category.distribution.export');
+    Route::get('/filters', [CategoryCaseDistributionController::class, 'getFilters'])->name('category.distribution.filters');
+});
+
+// Investigator Allocation Analytics - Available for all authenticated users
+Route::middleware(['auth:sanctum'])->prefix('investigator-allocation')->group(function () {
+    Route::get('/analytics', [InvestigatorAllocationController::class, 'getAllocationAnalytics'])->name('investigator.allocation.analytics');
+    Route::get('/trends', [InvestigatorAllocationController::class, 'getAllocationTrends'])->name('investigator.allocation.trends');
+    Route::get('/export', [InvestigatorAllocationController::class, 'exportAllocationData'])->name('investigator.allocation.export');
+    Route::get('/filters', [InvestigatorAllocationController::class, 'getFilters'])->name('investigator.allocation.filters');
 });

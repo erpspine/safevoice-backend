@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Api\Investigator;
 
 use App\Http\Controllers\Controller;
+use App\Models\CaseAssignment;
 use App\Models\CaseModel;
-use App\Models\InvestigatorCaseAssignment;
 use App\Models\CaseFile;
-use App\Models\CaseStatusLog;
+use App\Models\Thread;
+use App\Models\CaseMessage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -22,15 +23,16 @@ class InvestigatorCaseController extends Controller
         try {
             $user = $request->user();
 
-            $query = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $query = CaseAssignment::where('investigator_id', $user->id)
                 ->with([
                     'case' => function ($q) {
-                        $q->select('id', 'case_token', 'title', 'description', 'status', 'priority', 'deadline', 'created_at', 'company_id', 'branch_id', 'incident_category_id');
+                        $q->select('id', 'case_token', 'title', 'description', 'status', 'priority', 'created_at', 'company_id', 'branch_id');
                     },
                     'case.company:id,name,logo',
                     'case.branch:id,name',
-                    'case.incidentCategory:id,name,color',
-                    'case.investigatorAssignments' => function ($q) {
+                    'case.caseCategories.incidentCategory:id,name',
+                    'case.caseCategories.feedbackCategory:id,name',
+                    'case.assignments' => function ($q) {
                         $q->with('investigator:id,name,email');
                     }
                 ]);
@@ -119,19 +121,32 @@ class InvestigatorCaseController extends Controller
                             'id' => $case->branch->id,
                             'name' => $case->branch->name,
                         ] : null,
-                        'incident_category' => $case->incidentCategory ? [
-                            'id' => $case->incidentCategory->id,
-                            'name' => $case->incidentCategory->name,
-                            'color' => $case->incidentCategory->color,
-                        ] : null,
-                        'investigators' => $case->investigatorAssignments->map(function ($assign) {
+                        'categories' => $case->caseCategories->map(function ($caseCategory) {
+                            if ($caseCategory->category_type === 'incident' && $caseCategory->incidentCategory) {
+                                return [
+                                    'id' => $caseCategory->incidentCategory->id,
+                                    'name' => $caseCategory->incidentCategory->name,
+                                    'color' => $caseCategory->incidentCategory->color,
+                                    'type' => 'incident',
+                                ];
+                            } elseif ($caseCategory->category_type === 'feedback' && $caseCategory->feedbackCategory) {
+                                return [
+                                    'id' => $caseCategory->feedbackCategory->id,
+                                    'name' => $caseCategory->feedbackCategory->name,
+                                    'color' => $caseCategory->feedbackCategory->color,
+                                    'type' => 'feedback',
+                                ];
+                            }
+                            return null;
+                        })->filter(),
+                        'investigators' => $case->assignments ? $case->assignments->map(function ($assign) {
                             return [
                                 'id' => $assign->investigator->id,
                                 'name' => $assign->investigator->name,
                                 'email' => $assign->investigator->email,
                                 'assigned_at' => $assign->created_at,
                             ];
-                        }),
+                        }) : [],
                     ],
                     'assigned_at' => $assignment->created_at,
                     'role' => $assignment->role,
@@ -168,6 +183,133 @@ class InvestigatorCaseController extends Controller
     }
 
     /**
+     * Get cases with thread statistics for investigator
+     */
+    public function getCasesWithThreads(Request $request)
+    {
+        try {
+            $user = $request->user();
+
+            $query = CaseModel::with([
+                'company:id,name,email',
+                'branch:id,name,location',
+                'assignments.investigator:id,name,email'
+            ])->whereHas('assignments', function ($q) use ($user) {
+                $q->where('investigator_id', $user->id);
+            });
+
+            // Apply filters
+            if ($request->has('status') && $request->status !== '') {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('priority') && $request->priority !== '') {
+                $query->where('priority', $request->priority);
+            }
+
+            if ($request->has('type') && $request->type !== '') {
+                $query->where('type', $request->type);
+            }
+
+            if ($request->has('search') && $request->search !== '') {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('title', 'ILIKE', '%' . $search . '%')
+                        ->orWhere('description', 'ILIKE', '%' . $search . '%')
+                        ->orWhere('case_token', 'ILIKE', '%' . $search . '%');
+                });
+            }
+
+            if ($request->has('date_from') && $request->date_from !== '') {
+                $query->whereDate('created_at', '>=', $request->date_from);
+            }
+
+            if ($request->has('date_to') && $request->date_to !== '') {
+                $query->whereDate('created_at', '<=', $request->date_to);
+            }
+
+            // Add thread statistics using subqueries
+            $query->addSelect([
+                'thread_count' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id'),
+                'total_messages' => CaseMessage::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id'),
+                'unread_messages' => DB::table('case_messages')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->whereNotExists(function ($query) use ($user) {
+                        $query->select(DB::raw(1))
+                            ->from('message_reads')
+                            ->whereColumn('message_reads.message_id', 'case_messages.id')
+                            ->where('message_reads.user_id', $user->id);
+                    }),
+                'latest_message_date' => CaseMessage::select('created_at')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->latest()
+                    ->limit(1),
+                'active_threads' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->where('status', 'active'),
+                'closed_threads' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->where('status', 'closed')
+            ]);
+
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            $query->orderBy($sortBy, $sortOrder);
+
+            $perPage = $request->get('per_page', 15);
+            $cases = $query->paginate($perPage);
+
+            // Transform the data to include thread statistics
+            $cases->getCollection()->transform(function ($case) {
+                return [
+                    'id' => $case->id,
+                    'case_token' => $case->case_token,
+                    'title' => $case->title,
+                    'type' => $case->type,
+                    'status' => $case->status,
+                    'priority' => $case->priority,
+                    'created_at' => $case->created_at,
+                    'updated_at' => $case->updated_at,
+                    'company' => $case->company,
+                    'branch' => $case->branch,
+                    'assignments' => $case->assignments,
+                    'thread_statistics' => [
+                        'total_threads' => (int) $case->thread_count,
+                        'active_threads' => (int) $case->active_threads,
+                        'closed_threads' => (int) $case->closed_threads,
+                        'total_messages' => (int) $case->total_messages,
+                        'unread_messages' => (int) $case->unread_messages,
+                        'latest_message_date' => $case->latest_message_date,
+                        'has_unread_messages' => (int) $case->unread_messages > 0,
+                        'has_active_threads' => (int) $case->active_threads > 0
+                    ]
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cases with thread statistics retrieved successfully',
+                'data' => $cases
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to retrieve investigator cases with thread statistics', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->id ?? null,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve cases with thread statistics',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
      * Get a specific case details
      */
     public function show(Request $request, $caseId)
@@ -175,150 +317,81 @@ class InvestigatorCaseController extends Controller
         try {
             $user = $request->user();
 
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
-                ->where('case_id', $caseId)
-                ->with([
-                    'case' => function ($q) {
-                        $q->with([
-                            'company:id,name,logo,email,phone_number',
-                            'branch:id,name,address,email,phone_number',
-                            'incidentCategory:id,name,color,description',
-                            'feedbackCategories:id,name,color',
-                            'departments:id,name,description',
-                            'investigatorAssignments.investigator:id,name,email,phone_number',
-                            'files',
-                            'statusLogs' => function ($q) {
-                                $q->with('user:id,name,role')->orderBy('created_at', 'desc');
-                            }
-                        ]);
-                    }
-                ])
-                ->first();
+            // Build case query with thread statistics
+            $caseQuery = CaseModel::with([
+                'company:id,name,email,contact,address',
+                'branch:id,name,location',
+                'assignments.investigator:id,name,email,phone_number',
+                'assignments.assignedBy:id,name',
+                'files'
+            ])->whereHas('assignments', function ($q) use ($user) {
+                $q->where('investigator_id', $user->id);
+            });
 
-            if (!$assignment) {
+            // Add thread statistics
+            $caseQuery->addSelect([
+                'thread_count' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id'),
+                'total_messages' => CaseMessage::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id'),
+                'unread_messages' => DB::table('case_messages')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->whereNotExists(function ($query) use ($user) {
+                        $query->select(DB::raw(1))
+                            ->from('message_reads')
+                            ->whereColumn('message_reads.message_id', 'case_messages.id')
+                            ->where('message_reads.user_id', $user->id);
+                    }),
+                'latest_message_date' => CaseMessage::select('created_at')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->latest()
+                    ->limit(1),
+                'active_threads' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->where('status', 'active'),
+                'closed_threads' => Thread::selectRaw('count(*)')
+                    ->whereColumn('case_id', 'cases.id')
+                    ->where('status', 'closed')
+            ]);
+
+            $case = $caseQuery->find($caseId);
+
+            if (!$case) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Case not found or not assigned to you'
                 ], 404);
             }
 
-            $case = $assignment->case;
+            // Get investigator's assignment
+            $assignment = $case->assignments->where('investigator_id', $user->id)->first();
 
-            // Get case timeline/activity
-            $timeline = $this->getCaseTimeline($case->id);
-
-            // Get case statistics
-            $stats = [
-                'total_files' => $case->files->count(),
-                'total_messages' => $case->threads()->withCount('messages')->get()->sum('messages_count'),
-                'investigators_count' => $case->investigatorAssignments->count(),
-                'days_since_created' => $case->created_at->diffInDays(now()),
-                'days_until_deadline' => $case->deadline ? now()->diffInDays($case->deadline, false) : null,
+            // Format the response with thread statistics
+            $caseData = $case->toArray();
+            $caseData['thread_statistics'] = [
+                'total_threads' => (int) $case->thread_count,
+                'active_threads' => (int) $case->active_threads,
+                'closed_threads' => (int) $case->closed_threads,
+                'total_messages' => (int) $case->total_messages,
+                'unread_messages' => (int) $case->unread_messages,
+                'latest_message_date' => $case->latest_message_date,
+                'has_unread_messages' => (int) $case->unread_messages > 0,
+                'has_active_threads' => (int) $case->active_threads > 0
             ];
 
+            // Add assignment info
+            $caseData['assignment'] = $assignment ? [
+                'id' => $assignment->id,
+                'role' => $assignment->role,
+                'notes' => $assignment->notes,
+                'assigned_at' => $assignment->created_at,
+            ] : null;
+
             return response()->json([
-                'status' => 'success',
-                'data' => [
-                    'assignment' => [
-                        'id' => $assignment->id,
-                        'role' => $assignment->role,
-                        'notes' => $assignment->notes,
-                        'assigned_at' => $assignment->created_at,
-                    ],
-                    'case' => [
-                        'id' => $case->id,
-                        'case_token' => $case->case_token,
-                        'title' => $case->title,
-                        'description' => $case->description,
-                        'status' => $case->status,
-                        'priority' => $case->priority,
-                        'deadline' => $case->deadline,
-                        'is_overdue' => $case->deadline && $case->deadline < now(),
-                        'is_anonymous' => $case->is_anonymous,
-                        'reporter_name' => $case->reporter_name,
-                        'reporter_email' => $case->reporter_email,
-                        'reporter_phone' => $case->reporter_phone,
-                        'incident_date' => $case->incident_date,
-                        'incident_location' => $case->incident_location,
-                        'evidence_description' => $case->evidence_description,
-                        'witness_information' => $case->witness_information,
-                        'additional_notes' => $case->additional_notes,
-                        'created_at' => $case->created_at,
-                        'updated_at' => $case->updated_at,
-                        'company' => [
-                            'id' => $case->company->id,
-                            'name' => $case->company->name,
-                            'logo' => $case->company->logo,
-                            'email' => $case->company->email,
-                            'phone_number' => $case->company->phone_number,
-                        ],
-                        'branch' => $case->branch ? [
-                            'id' => $case->branch->id,
-                            'name' => $case->branch->name,
-                            'address' => $case->branch->address,
-                            'email' => $case->branch->email,
-                            'phone_number' => $case->branch->phone_number,
-                        ] : null,
-                        'incident_category' => $case->incidentCategory ? [
-                            'id' => $case->incidentCategory->id,
-                            'name' => $case->incidentCategory->name,
-                            'color' => $case->incidentCategory->color,
-                            'description' => $case->incidentCategory->description,
-                        ] : null,
-                        'feedback_categories' => $case->feedbackCategories->map(function ($category) {
-                            return [
-                                'id' => $category->id,
-                                'name' => $category->name,
-                                'color' => $category->color,
-                            ];
-                        }),
-                        'departments' => $case->departments->map(function ($department) {
-                            return [
-                                'id' => $department->id,
-                                'name' => $department->name,
-                                'description' => $department->description,
-                            ];
-                        }),
-                        'investigators' => $case->investigatorAssignments->map(function ($assign) {
-                            return [
-                                'id' => $assign->investigator->id,
-                                'name' => $assign->investigator->name,
-                                'email' => $assign->investigator->email,
-                                'phone_number' => $assign->investigator->phone_number,
-                                'role' => $assign->role,
-                                'assigned_at' => $assign->created_at,
-                            ];
-                        }),
-                        'files' => $case->files->map(function ($file) {
-                            return [
-                                'id' => $file->id,
-                                'filename' => $file->filename,
-                                'original_filename' => $file->original_filename,
-                                'file_type' => $file->file_type,
-                                'file_size' => $file->file_size,
-                                'category' => $file->category,
-                                'uploaded_by' => $file->uploaded_by,
-                                'created_at' => $file->created_at,
-                            ];
-                        }),
-                        'status_history' => $case->statusLogs->map(function ($log) {
-                            return [
-                                'id' => $log->id,
-                                'old_status' => $log->old_status,
-                                'new_status' => $log->new_status,
-                                'notes' => $log->notes,
-                                'changed_by' => [
-                                    'id' => $log->user->id,
-                                    'name' => $log->user->name,
-                                    'role' => $log->user->role,
-                                ],
-                                'created_at' => $log->created_at,
-                            ];
-                        }),
-                    ],
-                    'timeline' => $timeline,
-                    'statistics' => $stats,
-                ]
+                'success' => true,
+                'message' => 'Case retrieved successfully',
+                'data' => $caseData
             ], 200);
         } catch (\Exception $e) {
             Log::error('Investigator case show error', [
@@ -343,7 +416,7 @@ class InvestigatorCaseController extends Controller
             $user = $request->user();
 
             // Verify investigator has access to this case
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -380,16 +453,11 @@ class InvestigatorCaseController extends Controller
             if (!empty($changes)) {
                 $case->save();
 
-                // Log status change
-                if (isset($changes['status'])) {
-                    CaseStatusLog::create([
-                        'case_id' => $case->id,
-                        'user_id' => $user->id,
-                        'old_status' => $changes['status']['old'],
-                        'new_status' => $changes['status']['new'],
-                        'notes' => $request->notes ?? 'Status updated by investigator'
-                    ]);
-                }
+                Log::info('Case updated by investigator', [
+                    'case_id' => $case->id,
+                    'user_id' => $user->id,
+                    'changes' => $changes
+                ]);
             }
 
             // Update assignment notes if provided
@@ -445,7 +513,7 @@ class InvestigatorCaseController extends Controller
             $user = $request->user();
 
             // Verify investigator has access to this case
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -506,23 +574,8 @@ class InvestigatorCaseController extends Controller
     {
         $activities = [];
 
-        // Get status logs
-        $statusLogs = CaseStatusLog::where('case_id', $caseId)
-            ->with('user:id,name,role')
-            ->get();
-
-        foreach ($statusLogs as $log) {
-            $activities[] = [
-                'type' => 'status_change',
-                'title' => 'Status changed from ' . ucfirst($log->old_status) . ' to ' . ucfirst($log->new_status),
-                'description' => $log->notes,
-                'user' => $log->user->name . ' (' . ucfirst($log->user->role) . ')',
-                'timestamp' => $log->created_at,
-            ];
-        }
-
         // Get investigator assignments
-        $assignments = InvestigatorCaseAssignment::where('case_id', $caseId)
+        $assignments = CaseAssignment::where('case_id', $caseId)
             ->with('investigator:id,name')
             ->get();
 

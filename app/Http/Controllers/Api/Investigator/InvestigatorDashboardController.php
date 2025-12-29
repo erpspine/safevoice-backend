@@ -4,8 +4,9 @@ namespace App\Http\Controllers\Api\Investigator;
 
 use App\Http\Controllers\Controller;
 use App\Models\CaseModel;
-use App\Models\CaseThread;
-use App\Models\InvestigatorCaseAssignment;
+use App\Models\Thread;
+use App\Models\CaseAssignment;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -14,34 +15,71 @@ use Carbon\Carbon;
 class InvestigatorDashboardController extends Controller
 {
     /**
-     * Get investigator dashboard data
+     * Get dashboard statistics for the authenticated investigator.
      */
-    public function dashboard(Request $request)
+    public function dashboard(Request $request): JsonResponse
     {
         try {
             $user = $request->user();
 
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can view dashboard.'
+                ], 403);
+            }
+
+            $investigatorId = $user->id;
+
+            // Quick overview numbers
+            $overview = [
+                'total_cases' => CaseAssignment::where('investigator_id', $investigatorId)->count(),
+                'active_cases' => CaseAssignment::where('investigator_id', $investigatorId)
+                    ->whereHas('case', function ($q) {
+                        $q->whereNotIn('status', ['closed', 'resolved']);
+                    })->count(),
+                'resolved_cases' => CaseAssignment::where('investigator_id', $investigatorId)
+                    ->whereHas('case', function ($q) {
+                        $q->whereIn('status', ['resolved', 'closed']);
+                    })->count(),
+                'urgent_cases' => CaseAssignment::where('investigator_id', $investigatorId)
+                    ->whereHas('case', function ($q) {
+                        $q->where('priority', 1)
+                            ->whereNotIn('status', ['closed', 'resolved']);
+                    })->count(),
+            ];
+
             // Get case statistics
-            $caseStats = $this->getCaseStatistics($user->id);
+            $caseStats = $this->getCaseStatistics($investigatorId);
 
             // Get recent cases
-            $recentCases = $this->getRecentCases($user->id);
+            $recentCases = $this->getRecentCases($investigatorId);
 
             // Get priority cases
-            $priorityCases = $this->getPriorityCases($user->id);
+            $priorityCases = $this->getPriorityCases($investigatorId);
 
             // Get thread activity
-            $threadActivity = $this->getThreadActivity($user->id);
+            $threadActivity = $this->getThreadActivity($investigatorId);
 
             // Get workload distribution
-            $workloadDistribution = $this->getWorkloadDistribution($user->id);
+            $workloadDistribution = $this->getWorkloadDistribution($investigatorId);
 
             // Get monthly case trends
-            $monthlyCaseTrends = $this->getMonthlyCaseTrends($user->id);
+            $monthlyCaseTrends = $this->getMonthlyCaseTrends($investigatorId);
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'data' => [
+                    'overview' => $overview,
                     'case_statistics' => $caseStats,
                     'recent_cases' => $recentCases,
                     'priority_cases' => $priorityCases,
@@ -49,17 +87,12 @@ class InvestigatorDashboardController extends Controller
                     'workload_distribution' => $workloadDistribution,
                     'monthly_trends' => $monthlyCaseTrends,
                 ]
-            ], 200);
-        } catch (\Exception $e) {
-            Log::error('Investigator dashboard error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
-
+        } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to load dashboard data'
+                'success' => false,
+                'message' => 'Failed to retrieve dashboard statistics',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -69,7 +102,7 @@ class InvestigatorDashboardController extends Controller
      */
     private function getCaseStatistics($investigatorId)
     {
-        $baseQuery = InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+        $baseQuery = CaseAssignment::where('investigator_id', $investigatorId)
             ->whereHas('case');
 
         return [
@@ -84,12 +117,8 @@ class InvestigatorDashboardController extends Controller
                 $q->where('status', 'pending_review');
             })->count(),
             'urgent_cases' => $baseQuery->whereHas('case', function ($q) {
-                $q->where('priority', 'urgent')
+                $q->where('priority', 1)
                     ->whereIn('status', ['open', 'in_progress', 'under_investigation']);
-            })->count(),
-            'overdue_cases' => $baseQuery->whereHas('case', function ($q) {
-                $q->where('deadline', '<', now())
-                    ->whereNotIn('status', ['closed', 'resolved']);
             })->count(),
         ];
     }
@@ -99,12 +128,11 @@ class InvestigatorDashboardController extends Controller
      */
     private function getRecentCases($investigatorId)
     {
-        return InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+        return CaseAssignment::where('investigator_id', $investigatorId)
             ->with([
-                'case:id,case_token,title,description,status,priority,created_at,deadline',
+                'case:id,case_token,title,description,status,priority,created_at',
                 'case.company:id,name,logo',
-                'case.branch:id,name',
-                'case.incidentCategory:id,name,color'
+                'case.branch:id,name'
             ])
             ->orderBy('created_at', 'desc')
             ->limit(10)
@@ -119,22 +147,14 @@ class InvestigatorDashboardController extends Controller
                     'description_preview' => substr($case->description, 0, 100) . (strlen($case->description) > 100 ? '...' : ''),
                     'status' => $case->status,
                     'priority' => $case->priority,
-                    'deadline' => $case->deadline,
-                    'is_overdue' => $case->deadline && $case->deadline < now(),
-                    'days_until_deadline' => $case->deadline ? now()->diffInDays($case->deadline, false) : null,
-                    'company' => [
+                    'company' => $case->company ? [
                         'id' => $case->company->id,
                         'name' => $case->company->name,
                         'logo' => $case->company->logo,
-                    ],
+                    ] : null,
                     'branch' => $case->branch ? [
                         'id' => $case->branch->id,
                         'name' => $case->branch->name,
-                    ] : null,
-                    'incident_category' => $case->incidentCategory ? [
-                        'id' => $case->incidentCategory->id,
-                        'name' => $case->incidentCategory->name,
-                        'color' => $case->incidentCategory->color,
                     ] : null,
                     'assigned_at' => $assignment->created_at,
                     'case_created_at' => $case->created_at,
@@ -147,24 +167,20 @@ class InvestigatorDashboardController extends Controller
      */
     private function getPriorityCases($investigatorId)
     {
-        return InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+        return CaseAssignment::where('investigator_id', $investigatorId)
             ->whereHas('case', function ($q) {
-                $q->whereIn('priority', ['urgent', 'high'])
+                $q->whereIn('priority', [1, 2])
                     ->whereIn('status', ['open', 'in_progress', 'under_investigation']);
             })
             ->with([
-                'case:id,case_token,title,status,priority,deadline,created_at',
+                'case:id,case_token,title,status,priority,created_at',
                 'case.company:id,name',
                 'case.branch:id,name'
             ])
-            ->orderByRaw("
-                CASE 
-                    WHEN cases.priority = 'urgent' THEN 1
-                    WHEN cases.priority = 'high' THEN 2
-                    ELSE 3
-                END
-            ")
-            ->orderBy('created_at', 'asc')
+            ->join('cases', 'case_assignments.case_id', '=', 'cases.id')
+            ->select('case_assignments.*')
+            ->orderBy('cases.priority', 'asc')
+            ->orderBy('case_assignments.created_at', 'asc')
             ->limit(5)
             ->get()
             ->map(function ($assignment) {
@@ -175,10 +191,7 @@ class InvestigatorDashboardController extends Controller
                     'title' => $case->title ? $case->title : 'Untitled Case',
                     'status' => $case->status,
                     'priority' => $case->priority,
-                    'deadline' => $case->deadline,
-                    'is_overdue' => $case->deadline && $case->deadline < now(),
-                    'days_until_deadline' => $case->deadline ? now()->diffInDays($case->deadline, false) : null,
-                    'company_name' => $case->company->name,
+                    'company_name' => $case->company->name ?? null,
                     'branch_name' => $case->branch->name ?? null,
                     'assigned_at' => $assignment->created_at,
                 ];
@@ -190,41 +203,54 @@ class InvestigatorDashboardController extends Controller
      */
     private function getThreadActivity($investigatorId)
     {
-        $threadsWithMessages = CaseThread::whereHas('participants', function ($q) use ($investigatorId) {
-            $q->where('user_id', $investigatorId);
-        })
-            ->whereHas('case.investigatorAssignments', function ($q) use ($investigatorId) {
-                $q->where('investigator_id', $investigatorId);
+        // Get threads for cases assigned to investigator
+        $caseIds = CaseAssignment::where('investigator_id', $investigatorId)
+            ->where('status', 'active')
+            ->pluck('case_id');
+
+        $totalThreads = Thread::whereIn('case_id', $caseIds)->count();
+
+        // Count unread messages using message_reads table
+        $unreadCount = DB::table('case_messages')
+            ->join('threads', 'case_messages.thread_id', '=', 'threads.id')
+            ->whereIn('threads.case_id', $caseIds)
+            ->whereNotExists(function ($query) use ($investigatorId) {
+                $query->select(DB::raw(1))
+                    ->from('message_reads')
+                    ->whereColumn('message_reads.message_id', 'case_messages.id')
+                    ->where('message_reads.user_id', $investigatorId);
             })
-            ->with(['case', 'messages' => function ($q) {
-                $q->orderBy('created_at', 'desc')->limit(1);
-            }]);
+            ->count();
 
-        $unreadCount = $threadsWithMessages->whereHas('messages', function ($q) use ($investigatorId) {
-            $q->whereDoesntHave('readReceipts', function ($receipt) use ($investigatorId) {
-                $receipt->where('user_id', $investigatorId);
-            });
-        })->count();
-
-        $recentThreads = $threadsWithMessages->orderBy('updated_at', 'desc')
+        // Get recent threads with participant filter
+        $recentThreads = Thread::whereIn('case_id', $caseIds)
+            ->whereHas('participants', function ($q) use ($investigatorId) {
+                $q->where('user_id', $investigatorId);
+            })
+            ->with(['case:id,case_token,title'])
+            ->withCount('messages')
+            ->orderBy('updated_at', 'desc')
             ->limit(5)
             ->get()
             ->map(function ($thread) {
-                $lastMessage = $thread->messages->first();
                 return [
                     'thread_id' => $thread->id,
                     'subject' => $thread->subject,
                     'case_token' => $thread->case->case_token,
+                    'case_title' => $thread->case->title,
                     'last_message_at' => $thread->updated_at,
-                    'last_message_preview' => $lastMessage ? substr($lastMessage->message, 0, 50) . '...' : null,
                     'messages_count' => $thread->messages_count ?? 0,
                 ];
             });
 
+        $activeThreadsToday = Thread::whereIn('case_id', $caseIds)
+            ->where('updated_at', '>=', now()->startOfDay())
+            ->count();
+
         return [
-            'total_threads' => $threadsWithMessages->count(),
+            'total_threads' => $totalThreads,
             'unread_messages' => $unreadCount,
-            'active_threads_today' => $threadsWithMessages->where('updated_at', '>=', now()->startOfDay())->count(),
+            'active_threads_today' => $activeThreadsToday,
             'recent_threads' => $recentThreads,
         ];
     }
@@ -234,11 +260,11 @@ class InvestigatorDashboardController extends Controller
      */
     private function getWorkloadDistribution($investigatorId)
     {
-        return InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+        return CaseAssignment::where('investigator_id', $investigatorId)
             ->whereHas('case', function ($q) {
                 $q->whereIn('status', ['open', 'in_progress', 'under_investigation']);
             })
-            ->join('cases', 'investigator_case_assignments.case_id', '=', 'cases.id')
+            ->join('cases', 'case_assignments.case_id', '=', 'cases.id')
             ->join('companies', 'cases.company_id', '=', 'companies.id')
             ->select('companies.name as company_name', DB::raw('count(*) as case_count'))
             ->groupBy('companies.id', 'companies.name')
@@ -263,11 +289,11 @@ class InvestigatorDashboardController extends Controller
             $months[] = [
                 'month' => $date->format('M Y'),
                 'year_month' => $date->format('Y-m'),
-                'assigned_cases' => InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+                'assigned_cases' => CaseAssignment::where('investigator_id', $investigatorId)
                     ->whereYear('created_at', $date->year)
                     ->whereMonth('created_at', $date->month)
                     ->count(),
-                'closed_cases' => InvestigatorCaseAssignment::where('investigator_id', $investigatorId)
+                'closed_cases' => CaseAssignment::where('investigator_id', $investigatorId)
                     ->whereHas('case', function ($q) {
                         $q->where('status', 'closed');
                     })
@@ -283,45 +309,69 @@ class InvestigatorDashboardController extends Controller
     /**
      * Get quick stats for widgets
      */
-    public function quickStats(Request $request)
+    public function quickStats(Request $request): JsonResponse
     {
         try {
             $user = $request->user();
 
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can view quick stats.'
+                ], 403);
+            }
+
+            $investigatorId = $user->id;
+
+            // Get case IDs for investigator
+            $caseIds = CaseAssignment::where('investigator_id', $investigatorId)
+                ->where('status', 'active')
+                ->pluck('case_id');
+
+            // Count unread messages using message_reads table
+            $unreadMessages = DB::table('case_messages')
+                ->join('threads', 'case_messages.thread_id', '=', 'threads.id')
+                ->whereIn('threads.case_id', $caseIds)
+                ->whereNotExists(function ($query) use ($investigatorId) {
+                    $query->select(DB::raw(1))
+                        ->from('message_reads')
+                        ->whereColumn('message_reads.message_id', 'case_messages.id')
+                        ->where('message_reads.user_id', $investigatorId);
+                })
+                ->count();
+
             $stats = [
-                'total_cases' => InvestigatorCaseAssignment::where('investigator_id', $user->id)->count(),
-                'active_cases' => InvestigatorCaseAssignment::where('investigator_id', $user->id)
+                'total_cases' => CaseAssignment::where('investigator_id', $investigatorId)->count(),
+                'active_cases' => CaseAssignment::where('investigator_id', $investigatorId)
                     ->whereHas('case', function ($q) {
                         $q->whereIn('status', ['open', 'in_progress', 'under_investigation']);
                     })->count(),
-                'urgent_cases' => InvestigatorCaseAssignment::where('investigator_id', $user->id)
+                'urgent_cases' => CaseAssignment::where('investigator_id', $investigatorId)
                     ->whereHas('case', function ($q) {
-                        $q->where('priority', 'urgent')
+                        $q->where('priority', 1)
                             ->whereIn('status', ['open', 'in_progress', 'under_investigation']);
                     })->count(),
-                'unread_messages' => CaseThread::whereHas('participants', function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                })
-                    ->whereHas('messages', function ($q) use ($user) {
-                        $q->whereDoesntHave('readReceipts', function ($receipt) use ($user) {
-                            $receipt->where('user_id', $user->id);
-                        });
-                    })->count(),
+                'unread_messages' => $unreadMessages,
             ];
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'data' => $stats
-            ], 200);
-        } catch (\Exception $e) {
-            Log::error('Investigator quick stats error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
             ]);
-
+        } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to load quick stats'
+                'success' => false,
+                'message' => 'Failed to retrieve quick stats',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }

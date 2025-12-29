@@ -4,294 +4,362 @@ namespace App\Http\Controllers\Api\Investigator;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\CaseAssignment;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Facades\Log;
 
 class InvestigatorProfileController extends Controller
 {
     /**
-     * Get investigator profile
+     * View investigator profile details.
      */
-    public function show(Request $request)
+    public function show(Request $request): JsonResponse
     {
         try {
-            $user = $request->user()->load([
-                'investigatorAssignments.company:id,name,logo',
-                'investigatorAssignments.company.branches:id,company_id,name'
-            ]);
+            $user = $request->user();
+
+            // Check if user is authenticated via token
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can view profile.'
+                ], 403);
+            }
 
             // Get case statistics
             $caseStats = [
-                'total_assigned' => $user->investigatorCaseAssignments()->count(),
-                'active_cases' => $user->investigatorCaseAssignments()
+                'total_assigned' => CaseAssignment::where('investigator_id', $user->id)->count(),
+                'active_cases' => CaseAssignment::where('investigator_id', $user->id)
                     ->whereHas('case', function ($q) {
                         $q->whereIn('status', ['open', 'in_progress', 'under_investigation']);
                     })->count(),
-                'closed_cases' => $user->investigatorCaseAssignments()
+                'closed_cases' => CaseAssignment::where('investigator_id', $user->id)
                     ->whereHas('case', function ($q) {
                         $q->where('status', 'closed');
                     })->count(),
-                'pending_review' => $user->investigatorCaseAssignments()
+                'pending_review' => CaseAssignment::where('investigator_id', $user->id)
                     ->whereHas('case', function ($q) {
                         $q->where('status', 'pending_review');
                     })->count(),
             ];
 
-            // Get assigned companies with detailed info
-            $assignedCompanies = $user->investigatorAssignments->map(function ($assignment) {
-                return [
-                    'assignment_id' => $assignment->id,
-                    'company' => [
-                        'id' => $assignment->company->id,
-                        'name' => $assignment->company->name,
-                        'logo' => $assignment->company->logo,
-                    ],
-                    'branches' => $assignment->company->branches->map(function ($branch) {
-                        return [
-                            'id' => $branch->id,
-                            'name' => $branch->name,
-                        ];
-                    }),
-                    'assigned_at' => $assignment->created_at,
-                ];
-            });
-
-            // Recent activity - get recent cases
-            $recentCases = $user->investigatorCaseAssignments()
-                ->with(['case:id,case_token,title,status,priority,created_at', 'case.company:id,name'])
-                ->orderBy('created_at', 'desc')
-                ->limit(5)
+            // Get assigned companies
+            $assignedCompanies = CaseAssignment::where('investigator_id', $user->id)
+                ->where('status', 'active')
+                ->with(['case.company:id,name,logo', 'case.branch:id,name'])
                 ->get()
-                ->map(function ($assignment) {
-                    return [
-                        'case_id' => $assignment->case->id,
-                        'case_token' => $assignment->case->case_token,
-                        'title' => $assignment->case->title,
-                        'status' => $assignment->case->status,
-                        'priority' => $assignment->case->priority,
-                        'company' => $assignment->case->company->name,
-                        'assigned_at' => $assignment->created_at,
-                        'case_created_at' => $assignment->case->created_at,
-                    ];
-                });
+                ->pluck('case.company')
+                ->unique('id')
+                ->filter()
+                ->values();
+
+            // Add profile picture URL if exists
+            if ($user->profile_picture) {
+                $user->profile_picture_url = Storage::url($user->profile_picture);
+            } else {
+                $user->profile_picture_url = null;
+            }
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'data' => [
-                    'profile' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'phone_number' => $user->phone_number,
-                        'profile_picture' => $user->profile_picture,
-                        'status' => $user->status,
-                        'is_verified' => $user->is_verified,
-                        'last_login' => $user->last_login,
-                        'created_at' => $user->created_at,
-                        'updated_at' => $user->updated_at,
-                    ],
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'phone_number' => $user->phone_number,
+                    'role' => $user->role,
+                    'status' => $user->status,
+                    'profile_picture' => $user->profile_picture,
+                    'profile_picture_url' => $user->profile_picture_url,
+                    'last_login' => $user->last_login,
                     'assigned_companies' => $assignedCompanies,
                     'case_statistics' => $caseStats,
-                    'recent_cases' => $recentCases,
+                    'created_at' => $user->created_at,
+                    'updated_at' => $user->updated_at
                 ]
-            ], 200);
-        } catch (\Exception $e) {
-            Log::error('Get investigator profile error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
             ]);
-
+        } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to retrieve profile information',
+                'success' => false,
+                'message' => 'Failed to retrieve profile',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
 
     /**
-     * Update investigator profile
+     * Update investigator profile information.
      */
-    public function update(Request $request)
+    public function update(Request $request): JsonResponse
     {
+        DB::beginTransaction();
+
         try {
             $user = $request->user();
 
-            $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
-                'phone_number' => 'nullable|string|max:20',
+            // Check if user is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can update profile.'
+                ], 403);
+            }
+
+            // Validate input
+            $validator = Validator::make($request->all(), [
+                'name' => 'sometimes|required|string|max:255',
+                'email' => 'sometimes|required|email|unique:users,email,' . $user->id,
+                'phone_number' => 'sometimes|nullable|string|max:20',
             ]);
 
-            $user->update([
-                'name' => $request->name,
-                'email' => $request->email,
-                'phone_number' => $request->phone_number,
-            ]);
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'error' => $validator->errors()
+                ], 422);
+            }
 
-            Log::info('Investigator profile updated', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'changes' => $request->only(['name', 'email', 'phone_number'])
-            ]);
+            $validated = $validator->validated();
+
+            // Update user profile
+            $user->update($validated);
+
+            DB::commit();
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'message' => 'Profile updated successfully',
                 'data' => [
-                    'profile' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'phone_number' => $user->phone_number,
-                        'profile_picture' => $user->profile_picture,
-                        'updated_at' => $user->updated_at,
-                    ]
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'phone_number' => $user->phone_number,
+                    'role' => $user->role,
+                    'updated_at' => $user->updated_at
                 ]
-            ], 200);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            Log::error('Investigator profile update error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
             ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to update profile'
+                'success' => false,
+                'message' => 'Failed to update profile',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
 
     /**
-     * Upload profile picture
+     * Upload investigator profile picture.
      */
-    public function uploadProfilePicture(Request $request)
+    public function uploadProfilePicture(Request $request): JsonResponse
     {
+        DB::beginTransaction();
+
         try {
-            $request->validate([
+            $user = $request->user();
+
+            // Check if user is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can upload profile pictures.'
+                ], 403);
+            }
+
+            // Validate input
+            $validator = Validator::make($request->all(), [
                 'profile_picture' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
             ]);
 
-            $user = $request->user();
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'error' => $validator->errors()
+                ], 422);
+            }
 
             // Delete old profile picture if exists
-            if ($user->profile_picture) {
-                $oldPicturePath = str_replace('/storage/', '', $user->profile_picture);
-                if (Storage::disk('public')->exists($oldPicturePath)) {
-                    Storage::disk('public')->delete($oldPicturePath);
-                }
+            if ($user->profile_picture && Storage::exists($user->profile_picture)) {
+                Storage::delete($user->profile_picture);
             }
 
             // Store new profile picture
             $file = $request->file('profile_picture');
-            $filename = 'investigator_' . $user->id . '_' . time() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('profile-pictures', $filename, 'public');
+            $timestamp = time();
+            $extension = $file->getClientOriginalExtension();
+            $filename = "user_{$user->id}_{$timestamp}.{$extension}";
+            $path = $file->storeAs('public/user-profiles', $filename);
 
-            $profilePictureUrl = '/storage/' . $path;
+            // Update user profile picture path
+            $user->update(['profile_picture' => $path]);
 
-            $user->update(['profile_picture' => $profilePictureUrl]);
-
-            Log::info('Investigator profile picture uploaded', [
-                'user_id' => $user->id,
-                'file_path' => $profilePictureUrl,
-            ]);
+            DB::commit();
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'message' => 'Profile picture uploaded successfully',
                 'data' => [
-                    'profile_picture' => $profilePictureUrl
+                    'profile_picture' => $path,
+                    'profile_picture_url' => Storage::url($path)
                 ]
-            ], 200);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            Log::error('Investigator profile picture upload error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
             ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to upload profile picture'
+                'success' => false,
+                'message' => 'Failed to upload profile picture',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
 
     /**
-     * Delete profile picture
+     * Delete investigator profile picture.
      */
-    public function deleteProfilePicture(Request $request)
+    public function deleteProfilePicture(Request $request): JsonResponse
     {
+        DB::beginTransaction();
+
         try {
             $user = $request->user();
 
-            if ($user->profile_picture) {
-                $picturePath = str_replace('/storage/', '', $user->profile_picture);
-                if (Storage::disk('public')->exists($picturePath)) {
-                    Storage::disk('public')->delete($picturePath);
-                }
-
-                $user->update(['profile_picture' => null]);
-
-                Log::info('Investigator profile picture deleted', [
-                    'user_id' => $user->id,
-                ]);
-
+            // Check if user is authenticated
+            if (!$user) {
                 return response()->json([
-                    'status' => 'success',
-                    'message' => 'Profile picture deleted successfully'
-                ], 200);
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
             }
 
-            return response()->json([
-                'status' => 'error',
-                'message' => 'No profile picture to delete'
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error('Investigator profile picture deletion error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
-            ]);
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can delete profile pictures.'
+                ], 403);
+            }
+
+            // Check if profile picture exists
+            if (!$user->profile_picture) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No profile picture to delete'
+                ], 404);
+            }
+
+            // Delete profile picture from storage
+            if (Storage::exists($user->profile_picture)) {
+                Storage::delete($user->profile_picture);
+            }
+
+            // Update user profile picture to null
+            $user->update(['profile_picture' => null]);
+
+            DB::commit();
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to delete profile picture'
+                'success' => true,
+                'message' => 'Profile picture deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete profile picture',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
 
     /**
-     * Change password
+     * Change investigator password.
      */
-    public function changePassword(Request $request)
+    public function changePassword(Request $request): JsonResponse
     {
+        DB::beginTransaction();
+
         try {
-            $request->validate([
+            $user = $request->user();
+
+            // Check if user is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has investigator role
+            if ($user->role !== 'investigator') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only investigators can change password.'
+                ], 403);
+            }
+
+            // Validate input
+            $validator = Validator::make($request->all(), [
                 'current_password' => 'required|string',
-                'new_password' => 'required|string|min:8|confirmed',
+                'new_password' => [
+                    'required',
+                    'string',
+                    'confirmed',
+                    Password::min(8)
+                        ->mixedCase()
+                        ->numbers()
+                        ->symbols()
+                ],
             ]);
 
-            $user = $request->user();
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'error' => $validator->errors()
+                ], 422);
+            }
 
             // Verify current password
             if (!Hash::check($request->current_password, $user->password)) {
                 return response()->json([
-                    'status' => 'error',
+                    'success' => false,
                     'message' => 'Current password is incorrect',
-                    'errors' => [
+                    'error' => [
                         'current_password' => ['The current password is incorrect.']
                     ]
                 ], 422);
@@ -302,30 +370,19 @@ class InvestigatorProfileController extends Controller
                 'password' => Hash::make($request->new_password)
             ]);
 
-            Log::info('Investigator password changed', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-            ]);
+            DB::commit();
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'message' => 'Password changed successfully'
-            ], 200);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            Log::error('Investigator password change error', [
-                'user_id' => $request->user()->id,
-                'message' => $e->getMessage(),
             ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to change password'
+                'success' => false,
+                'message' => 'Failed to change password',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }

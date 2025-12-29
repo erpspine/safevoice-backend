@@ -148,6 +148,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Get all case assignments for this investigator.
+     */
+    public function investigatorAssignments(): HasMany
+    {
+        return $this->hasMany(CaseAssignment::class, 'investigator_id');
+    }
+
+    /**
      * Get all cases assigned to this user (through assignee relationship).
      */
     public function assignedCases(): HasMany

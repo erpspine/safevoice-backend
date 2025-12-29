@@ -81,7 +81,7 @@ class BranchThreadController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'case' => $case->only(['id', 'case_token', 'title', 'status']),
+                    'case' => $case->only(['id', 'case_token', 'title', 'status', 'type']),
                     'threads' => $threads
                 ]
             ]);
@@ -331,7 +331,7 @@ class BranchThreadController extends Controller
                         'participants' => $thread->participants
                     ],
                     'messages' => $messages,
-                    'case' => $case->only(['id', 'case_token', 'title', 'status'])
+                    'case' => $case->only(['id', 'case_token', 'title', 'status', 'type'])
                 ]
             ]);
         } catch (\Exception $e) {
@@ -441,7 +441,7 @@ class BranchThreadController extends Controller
                         'created_at' => $thread->created_at
                     ],
                     'messages' => $messages,
-                    'case' => $case->only(['id', 'case_token', 'title', 'status'])
+                    'case' => $case->only(['id', 'case_token', 'title', 'status', 'type'])
                 ]
             ]);
         } catch (\Exception $e) {

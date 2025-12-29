@@ -93,31 +93,27 @@ class CaseTrackingAuthController extends Controller
             'additionalParties:id,case_id,name,email,phone,job_title,role'
         ];
 
-        // Load category based on type
-        if ($case->type === 'incident') {
-            $relationships[] = 'incidentCategories:id,name';
-        } elseif ($case->type === 'feedback') {
-            $relationships[] = 'feedbackCategories:id,name';
-        }
+        // Load case categories instead of direct category relationships
+        $relationships[] = 'caseCategories.incidentCategory:id,name';
+        $relationships[] = 'caseCategories.feedbackCategory:id,name';
 
         $case->load($relationships);
 
-        // Get category data based on type
+        // Get category data from case categories
         $categoryData = null;
-        if ($case->type === 'incident' && $case->incidentCategories->count() > 0) {
-            $categoryData = $case->incidentCategories->map(function ($category) {
+        if ($case->caseCategories->count() > 0) {
+            $categoryData = $case->caseCategories->map(function ($caseCategory) {
+                $category = $caseCategory->category_type === 'incident'
+                    ? $caseCategory->incidentCategory
+                    : $caseCategory->feedbackCategory;
                 return [
-                    'id' => $category->id,
-                    'name' => $category->name
+                    'id' => $category->id ?? null,
+                    'name' => $category->name ?? null,
+                    'type' => $caseCategory->category_type
                 ];
-            })->toArray();
-        } elseif ($case->type === 'feedback' && $case->feedbackCategories->count() > 0) {
-            $categoryData = $case->feedbackCategories->map(function ($category) {
-                return [
-                    'id' => $category->id,
-                    'name' => $category->name
-                ];
-            })->toArray();
+            })->filter(function ($category) {
+                return !is_null($category['id']);
+            })->values()->toArray();
         }
 
         return response()->json([

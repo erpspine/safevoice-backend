@@ -3,15 +3,17 @@
 namespace App\Http\Controllers\Api\Investigator;
 
 use App\Http\Controllers\Controller;
-use App\Models\CaseThread;
+use App\Models\Thread;
 use App\Models\CaseMessage;
-use App\Models\InvestigatorCaseAssignment;
+use App\Models\CaseAssignment;
+use App\Models\CaseModel;
 use App\Models\CaseFile;
 use App\Models\MessageReadReceipt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class InvestigatorThreadController extends Controller
@@ -25,7 +27,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify investigator has access to this case
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -36,61 +38,51 @@ class InvestigatorThreadController extends Controller
                 ], 404);
             }
 
-            $threads = CaseThread::where('case_id', $caseId)
+            // Get case info
+            $case = CaseModel::with(['company', 'branch'])
+                ->where('id', $caseId)
+                ->first();
+
+            // Get threads where user is a participant
+            $threads = Thread::where('case_id', $caseId)
+                ->whereHas('participants', function ($query) use ($user) {
+                    $query->where('user_id', $user->id);
+                })
                 ->with([
                     'participants.user:id,name,email,role',
-                    'messages' => function ($q) {
-                        $q->with(['sender:id,name,email,role', 'files'])
-                            ->orderBy('created_at', 'desc')
-                            ->limit(1);
+                    'messages' => function ($query) {
+                        $query->latest()->limit(1);
                     }
                 ])
-                ->withCount(['messages', 'participants'])
-                ->orderBy('updated_at', 'desc')
                 ->get()
                 ->map(function ($thread) use ($user) {
-                    $lastMessage = $thread->messages->first();
-                    $unreadCount = $this->getUnreadCount($thread->id, $user->id);
+                    // Get unread message count for this user
+                    $unreadCount = $this->getUnreadMessageCount($thread->id, $user->id);
 
                     return [
                         'id' => $thread->id,
-                        'subject' => $thread->subject,
+                        'case_id' => $thread->case_id,
+                        'title' => $thread->title,
                         'description' => $thread->description,
                         'status' => $thread->status,
+                        'created_by' => $thread->created_by,
                         'created_at' => $thread->created_at,
                         'updated_at' => $thread->updated_at,
-                        'participants_count' => $thread->participants_count,
-                        'messages_count' => $thread->messages_count,
+                        'participants_count' => $thread->participants->count(),
+                        'messages_count' => $thread->messages()->count(),
                         'unread_count' => $unreadCount,
-                        'last_message' => $lastMessage ? [
-                            'id' => $lastMessage->id,
-                            'message_preview' => substr($lastMessage->message, 0, 100) . '...',
-                            'sender' => [
-                                'id' => $lastMessage->sender->id,
-                                'name' => $lastMessage->sender->name,
-                                'role' => $lastMessage->sender->role,
-                            ],
-                            'created_at' => $lastMessage->created_at,
-                            'has_files' => $lastMessage->files->count() > 0,
-                        ] : null,
-                        'participants' => $thread->participants->map(function ($participant) {
-                            return [
-                                'id' => $participant->user->id,
-                                'name' => $participant->user->name,
-                                'email' => $participant->user->email,
-                                'role' => $participant->role,
-                            ];
-                        }),
+                        'latest_message' => $thread->messages->first(),
+                        'participants' => $thread->participants
                     ];
                 });
 
             return response()->json([
-                'status' => 'success',
+                'success' => true,
                 'data' => [
-                    'threads' => $threads,
-                    'total_count' => $threads->count(),
+                    'case' => $case ? $case->only(['id', 'case_token', 'title', 'status', 'type']) : null,
+                    'threads' => $threads
                 ]
-            ], 200);
+            ]);
         } catch (\Exception $e) {
             Log::error('Investigator threads index error', [
                 'user_id' => $request->user()->id,
@@ -114,7 +106,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify investigator has access to this case
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -125,12 +117,13 @@ class InvestigatorThreadController extends Controller
                 ], 404);
             }
 
-            $thread = CaseThread::where('id', $threadId)
+            // Get case info
+            $case = CaseModel::where('id', $caseId)->first();
+
+            $thread = Thread::where('id', $threadId)
                 ->where('case_id', $caseId)
                 ->with([
-                    'participants.user:id,name,email,role,profile_picture',
-                    'case:id,case_token,title,company_id',
-                    'case.company:id,name'
+                    'participants.user:id,name,email,role,profile_picture'
                 ])
                 ->first();
 
@@ -193,7 +186,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify access
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -204,7 +197,7 @@ class InvestigatorThreadController extends Controller
                 ], 404);
             }
 
-            $thread = CaseThread::where('id', $threadId)
+            $thread = Thread::where('id', $threadId)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -219,45 +212,57 @@ class InvestigatorThreadController extends Controller
             $perPage = min($request->get('per_page', 20), 100);
 
             $messages = CaseMessage::where('thread_id', $threadId)
-                ->with([
-                    'sender:id,name,email,role,profile_picture',
-                    'files',
-                    'readReceipts.user:id,name'
-                ])
+                ->with(['files'])
                 ->orderBy('created_at', 'asc')
                 ->paginate($perPage, ['*'], 'page', $page);
 
-            $messagesData = $messages->getCollection()->map(function ($message) use ($user) {
+            // Mark messages as read for this user
+            $this->markThreadAsRead($threadId, $user->id);
+
+            $messagesData = $messages->getCollection()->map(function ($message) use ($user, $caseId, $threadId) {
+                // Get read status
+                $readBy = DB::table('message_reads')
+                    ->where('message_id', $message->id)
+                    ->join('users', 'message_reads.user_id', '=', 'users.id')
+                    ->select('users.id as user_id', 'users.name as user_name', 'message_reads.read_at')
+                    ->get();
+
+                $isReadByMe = DB::table('message_reads')
+                    ->where('message_id', $message->id)
+                    ->where('user_id', $user->id)
+                    ->exists();
+
                 return [
                     'id' => $message->id,
-                    'message' => $message->message,
-                    'sender' => [
-                        'id' => $message->sender->id,
-                        'name' => $message->sender->name,
-                        'email' => $message->sender->email,
-                        'role' => $message->sender->role,
-                        'profile_picture' => $message->sender->profile_picture,
-                    ],
+                    'sender_id' => $message->sender_id,
                     'sender_type' => $message->sender_type,
-                    'files' => $message->files->map(function ($file) {
+                    'sender_name' => $message->sender_name,
+                    'message' => $message->message,
+                    'has_attachments' => $message->has_attachments,
+                    'files' => $message->files ? $message->files->map(function ($file) use ($caseId, $threadId, $message) {
                         return [
                             'id' => $file->id,
-                            'filename' => $file->filename,
-                            'original_filename' => $file->original_filename,
-                            'file_type' => $file->file_type,
+                            'filename' => $file->original_name ?? $file->filename,
+                            'stored_name' => $file->stored_name ?? $file->filename,
                             'file_size' => $file->file_size,
-                            'category' => $file->category,
+                            'file_type' => $file->file_type,
+                            'download_url' => route('investigator.threads.messages.download', [
+                                'caseId' => $caseId,
+                                'threadId' => $threadId,
+                                'messageId' => $message->id,
+                                'filename' => $file->stored_name ?? $file->filename
+                            ])
                         ];
-                    }),
-                    'read_by' => $message->readReceipts->map(function ($receipt) {
-                        return [
-                            'user_id' => $receipt->user->id,
-                            'user_name' => $receipt->user->name,
-                            'read_at' => $receipt->read_at,
-                        ];
-                    }),
-                    'is_read_by_me' => $message->readReceipts->where('user_id', $user->id)->isNotEmpty(),
+                    }) : [],
                     'created_at' => $message->created_at,
+                    'is_read_by_me' => $isReadByMe,
+                    'read_by' => $readBy->map(function ($read) {
+                        return [
+                            'user_id' => $read->user_id,
+                            'user_name' => $read->user_name,
+                            'read_at' => $read->read_at,
+                        ];
+                    })
                 ];
             });
 
@@ -299,7 +304,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify access
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -310,7 +315,7 @@ class InvestigatorThreadController extends Controller
                 ], 404);
             }
 
-            $thread = CaseThread::where('id', $threadId)
+            $thread = Thread::where('id', $threadId)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -431,7 +436,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify access
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -483,7 +488,7 @@ class InvestigatorThreadController extends Controller
             $user = $request->user();
 
             // Verify access
-            $assignment = InvestigatorCaseAssignment::where('investigator_id', $user->id)
+            $assignment = CaseAssignment::where('investigator_id', $user->id)
                 ->where('case_id', $caseId)
                 ->first();
 
@@ -544,14 +549,49 @@ class InvestigatorThreadController extends Controller
     /**
      * Get unread count for user in thread
      */
-    private function getUnreadCount($threadId, $userId)
+    private function getUnreadMessageCount($threadId, $userId)
     {
         return CaseMessage::where('thread_id', $threadId)
-            ->where('sender_id', '!=', $userId)
-            ->whereDoesntHave('readReceipts', function ($q) use ($userId) {
-                $q->where('user_id', $userId);
+            ->where('sender_id', '!=', $userId) // Don't count own messages
+            ->whereNotExists(function ($query) use ($userId) {
+                $query->select(DB::raw(1))
+                    ->from('message_reads')
+                    ->whereColumn('message_reads.message_id', 'case_messages.id')
+                    ->where('message_reads.user_id', $userId);
             })
             ->count();
+    }
+
+    /**
+     * Helper method to mark all unread messages in a thread as read for a user.
+     */
+    private function markThreadAsRead($threadId, $userId)
+    {
+        // Get unread messages for this user in this thread
+        $unreadMessages = CaseMessage::where('thread_id', $threadId)
+            ->where('sender_id', '!=', $userId) // Don't mark own messages
+            ->whereNotExists(function ($query) use ($userId) {
+                $query->select(DB::raw(1))
+                    ->from('message_reads')
+                    ->whereColumn('message_reads.message_id', 'case_messages.id')
+                    ->where('message_reads.user_id', $userId);
+            })
+            ->pluck('id');
+
+        $markedCount = 0;
+        foreach ($unreadMessages as $messageId) {
+            DB::table('message_reads')->updateOrInsert([
+                'message_id' => $messageId,
+                'user_id' => $userId
+            ], [
+                'read_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            $markedCount++;
+        }
+
+        return $markedCount;
     }
 
     /**

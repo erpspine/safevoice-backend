@@ -56,6 +56,7 @@ class CaseModel extends BaseModel
         'session_token',
         'case_close_classification',
         'case_closed_at',
+        'closed_by',
         'session_expires_at',
     ];
 
@@ -70,6 +71,7 @@ class CaseModel extends BaseModel
         'witness_info' => 'array',
         'due_date' => 'date',
         'resolved_at' => 'datetime',
+        'case_closed_at' => 'datetime',
         'follow_up_required' => 'boolean',
         'is_anonymous' => 'boolean',
         'date_occurred' => 'date',
@@ -116,6 +118,14 @@ class CaseModel extends BaseModel
     public function assignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    /**
+     * Get the user who closed the case.
+     */
+    public function closedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by');
     }
 
     /**

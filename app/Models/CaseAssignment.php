@@ -17,10 +17,10 @@ class CaseAssignment extends BaseModel
     protected $fillable = [
         'case_id',
         'investigator_id',
-        'assigned_by_user_id',
+        'assigned_by',
         'assigned_at',
         'unassigned_at',
-        'unassigned_by_user_id',
+        'unassigned_by',
         'assignment_note',
         'assignment_type',
         'priority_level',
@@ -61,17 +61,17 @@ class CaseAssignment extends BaseModel
     /**
      * Get the user who made the assignment.
      */
-    public function assignedByUser(): BelongsTo
+    public function assignedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'assigned_by_user_id');
+        return $this->belongsTo(User::class, 'assigned_by');
     }
 
     /**
      * Get the user who unassigned the investigator.
      */
-    public function unassignedByUser(): BelongsTo
+    public function unassignedBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'unassigned_by_user_id');
+        return $this->belongsTo(User::class, 'unassigned_by');
     }
 
     /**
@@ -155,7 +155,7 @@ class CaseAssignment extends BaseModel
         return $this->update([
             'status' => 'completed',
             'unassigned_at' => now(),
-            'unassigned_by_user_id' => $user->id,
+            'unassigned_by' => $user->id,
             'assignment_note' => $note ? $this->assignment_note . "\n" . $note : $this->assignment_note,
         ]);
     }
@@ -168,7 +168,7 @@ class CaseAssignment extends BaseModel
         return $this->update([
             'status' => 'unassigned',
             'unassigned_at' => now(),
-            'unassigned_by_user_id' => $user->id,
+            'unassigned_by' => $user->id,
             'assignment_note' => $reason ? $this->assignment_note . "\nUnassigned: " . $reason : $this->assignment_note,
         ]);
     }

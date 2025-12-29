@@ -65,11 +65,12 @@ class CaseSubmissionController extends Controller
     public function submit(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
+            'type' => 'required|string|in:incident,feedback',
             'company_id' => 'required|string|exists:companies,id',
             'branch_id' => 'nullable|string|exists:branches,id',
             'description' => 'required|string',
             'location_description' => 'nullable|string|max:255',
-            'date_time_type' => 'required|string',
+            'date_time_type' => 'nullable|string',
             'date_occurred' => 'nullable|date',
             'time_occurred' => 'nullable|string',
             'general_timeframe' => 'nullable|string',
@@ -123,10 +124,10 @@ class CaseSubmissionController extends Controller
             $case = CaseModel::create([
                 'company_id' => $request->company_id,
                 'branch_id' => $request->branch_id,
-                'type' => 'incident',
+                'type' => $request->type,
                 'description' => $request->description,
                 'location_description' => $request->location_description,
-                'date_time_type' => $request->date_time_type,
+                'date_time_type' => $request->date_time_type ?? 'general',
                 'date_occurred' => $request->date_occurred,
                 'time_occurred' => $request->time_occurred,
                 'general_timeframe' => $request->general_timeframe,
@@ -244,6 +245,7 @@ class CaseSubmissionController extends Controller
                 'data' => [
                     'case_id' => $case->id,
                     'case_number' => $case->case_token,
+                    'type' => $case->type,
                     'access_id' => $accessId,
                     'status' => $case->status,
                     'submitted_at' => $case->created_at,
@@ -311,6 +313,7 @@ class CaseSubmissionController extends Controller
             'data' => [
                 'case_id' => $case->id,
                 'case_number' => $case->case_token,
+                'type' => $case->type,
                 'description' => $case->description,
                 'status' => $case->status,
                 'location_description' => $case->location_description,

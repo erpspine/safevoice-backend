@@ -88,8 +88,8 @@ class CompanyCaseController extends Controller
                 'assignee:id,name,email',
                 'branch:id,name',
                 'departments:id,name',
-                'incidentCategories:id,name',
-                'feedbackCategories:id,name',
+                'caseCategories.incidentCategory:id,name',
+                'caseCategories.feedbackCategory:id,name',
                 'assignments' => function ($query) {
                     $query->where('status', 'active')
                         ->with('investigator:id,name,email');
@@ -146,11 +146,11 @@ class CompanyCaseController extends Controller
                     'involvedParties.user:id,name,email',
                     'additionalParties:id,case_id,name,email,phone,role',
                     'assignments.investigator:id,name,email,phone',
-                    'assignments.assignedByUser:id,name',
+                    'assignments.assignedBy:id,name',
                     'departments:id,name,description',
                     'caseDepartments.assignedBy:id,name',
-                    'incidentCategories:id,name,description',
-                    'feedbackCategories:id,name,description',
+                    'caseCategories.incidentCategory:id,name,description',
+                    'caseCategories.feedbackCategory:id,name,description',
                     'caseCategories.assignedBy:id,name',
                     'files'
                 ])
@@ -260,6 +260,7 @@ class CompanyCaseController extends Controller
 
                     $updateData['case_close_classification'] = $request->case_close_classification;
                     $updateData['case_closed_at'] = now();
+                    $updateData['closed_by'] = $user->id;
                 }
             }
 
@@ -1102,22 +1103,6 @@ class CompanyCaseController extends Controller
                 ], 403);
             }
 
-            // Validate request
-            $validator = Validator::make($request->all(), [
-                'categories' => 'required|array|min:1',
-                'categories.*.category_id' => 'required|string',
-                'categories.*.category_type' => 'required|in:incident,feedback',
-                'assignment_note' => 'nullable|string|max:500'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
             // Get case and verify ownership
             $case = CaseModel::where('id', $id)
                 ->where('company_id', $user->company_id)
@@ -1130,60 +1115,75 @@ class CompanyCaseController extends Controller
                 ], 404);
             }
 
+            // Determine category type from case type
+            $categoryType = $case->type; // 'incident' or 'feedback'
+
+            // Validate request
+            $validator = Validator::make($request->all(), [
+                'category_ids' => 'required|array|min:1',
+                'category_ids.*' => 'required|string',
+                'assignment_note' => 'nullable|string|max:500'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
             DB::beginTransaction();
             try {
-                // Verify and assign categories
-                foreach ($request->categories as $categoryData) {
-                    $categoryType = $categoryData['category_type'];
-                    $categoryId = $categoryData['category_id'];
+                $assignedCategories = [];
 
-                    // Verify category belongs to the company
+                // Verify and assign categories based on case type
+                foreach ($request->category_ids as $categoryId) {
+                    // Verify category belongs to the company based on case type
                     if ($categoryType === 'incident') {
                         $category = IncidentCategory::where('id', $categoryId)
                             ->where('company_id', $user->company_id)
                             ->first();
-                    } else {
+                    } elseif ($categoryType === 'feedback') {
                         $category = FeedbackCategory::where('id', $categoryId)
                             ->where('company_id', $user->company_id)
                             ->first();
+                    } else {
+                        // Skip if case type is not incident or feedback
+                        continue;
                     }
 
                     if (!$category) {
-                        DB::rollBack();
-                        return response()->json([
-                            'success' => false,
-                            'message' => "Category {$categoryId} not found or does not belong to your company"
-                        ], 422);
+                        continue;
                     }
 
-                    // Assign category
-                    CaseCategory::updateOrCreate(
-                        [
+                    // Check if already assigned
+                    $existingAssignment = CaseCategory::where('case_id', $case->id)
+                        ->where('category_id', $categoryId)
+                        ->where('category_type', $categoryType)
+                        ->first();
+
+                    if (!$existingAssignment) {
+                        // Assign category
+                        $caseCategory = CaseCategory::create([
                             'case_id' => $case->id,
                             'category_id' => $categoryId,
-                            'category_type' => $categoryType
-                        ],
-                        [
-                            'assigned_at' => now(),
+                            'category_type' => $categoryType,
                             'assigned_by' => $user->id,
+                            'assigned_at' => now(),
                             'assignment_note' => $request->assignment_note
-                        ]
-                    );
+                        ]);
+
+                        $assignedCategories[] = $caseCategory;
+                    }
                 }
 
                 DB::commit();
 
-                // Load updated relationships
-                $case->load([
-                    'incidentCategories:id,name,description',
-                    'feedbackCategories:id,name,description',
-                    'caseCategories.assignedBy:id,name'
-                ]);
-
                 return response()->json([
                     'success' => true,
                     'message' => 'Categories assigned successfully',
-                    'data' => $case
+                    'data' => $assignedCategories
                 ]);
             } catch (\Exception $e) {
                 DB::rollBack();
@@ -1501,7 +1501,7 @@ class CompanyCaseController extends Controller
                 $assignment = CaseAssignment::create([
                     'case_id' => $id,
                     'investigator_id' => $investigator->id,
-                    'assigned_by_user_id' => $user->id,
+                    'assigned_by' => $user->id,
                     'assigned_at' => now(),
                     'assignment_type' => $investigatorData['assignment_type'] ?? 'primary',
                     'priority_level' => $investigatorData['priority_level'] ?? 2,
@@ -1511,7 +1511,7 @@ class CompanyCaseController extends Controller
                     'status' => 'active'
                 ]);
 
-                $assignment->load(['investigator:id,name,email,phone', 'assignedByUser:id,name']);
+                $assignment->load(['investigator:id,name,email,phone', 'assignedBy:id,name']);
                 $assignedInvestigators[] = $assignment;
             }
 
@@ -1609,7 +1609,7 @@ class CompanyCaseController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Investigator unassigned successfully',
-                'data' => $assignment->load('unassignedByUser:id,name')
+                'data' => $assignment->load('unassignedBy:id,name')
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1661,8 +1661,8 @@ class CompanyCaseController extends Controller
             $query = CaseAssignment::where('case_id', $id)
                 ->with([
                     'investigator:id,name,email,phone',
-                    'assignedByUser:id,name',
-                    'unassignedByUser:id,name'
+                    'assignedBy:id,name',
+                    'unassignedBy:id,name'
                 ]);
 
             // Filter by status if provided

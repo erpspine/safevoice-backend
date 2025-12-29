@@ -7,10 +7,14 @@ use App\Models\CaseModel;
 use App\Models\CaseAssignment;
 use App\Models\CaseDepartment;
 use App\Models\CaseCategory;
+use App\Models\CaseFile;
 use App\Models\Thread;
 use App\Models\CaseMessage;
 use App\Models\MessageRead;
 use App\Models\User;
+use App\Models\Department;
+use App\Models\IncidentCategory;
+use App\Models\FeedbackCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -35,8 +39,9 @@ class BranchCaseController extends Controller
                 'company:id,name,email',
                 'branch:id,name,location',
                 'departments:id,name',
-                'incidentCategories:id,name',
-                'feedbackCategories:id,name',
+                'caseCategories.incidentCategory:id,name',
+                'caseCategories.feedbackCategory:id,name',
+                'caseCategories.assignedBy:id,name',
                 'assignments.investigator:id,name,email'
             ])->where('branch_id', $user->branch_id);
 
@@ -48,8 +53,8 @@ class BranchCaseController extends Controller
                 $query->where('priority', $request->priority);
             }
 
-            if ($request->has('case_type') && $request->case_type !== '') {
-                $query->where('case_type', $request->case_type);
+            if ($request->has('type') && $request->type !== '') {
+                $query->where('type', $request->type);
             }
 
             if ($request->has('search') && $request->search !== '') {
@@ -114,6 +119,12 @@ class BranchCaseController extends Controller
                 ->pluck('count', 'status')
                 ->toArray();
 
+            $typeCounts = CaseModel::where('branch_id', $branchId)
+                ->select('type', DB::raw('count(*) as count'))
+                ->groupBy('type')
+                ->pluck('count', 'type')
+                ->toArray();
+
             $casesByDepartment = CaseModel::where('cases.branch_id', $branchId)
                 ->join('case_departments', 'cases.id', '=', 'case_departments.case_id')
                 ->join('departments', 'case_departments.department_id', '=', 'departments.id')
@@ -140,6 +151,7 @@ class BranchCaseController extends Controller
                 'message' => 'Branch dashboard data retrieved successfully',
                 'data' => [
                     'status_counts' => $statusCounts,
+                    'type_counts' => $typeCounts,
                     'cases_by_department' => [
                         'labels' => array_keys($casesByDepartment),
                         'data' => array_values($casesByDepartment)
@@ -185,8 +197,9 @@ class BranchCaseController extends Controller
                 'company:id,name,email',
                 'branch:id,name,location',
                 'departments:id,name',
-                'incidentCategories:id,name',
-                'feedbackCategories:id,name',
+                'caseCategories.incidentCategory:id,name',
+                'caseCategories.feedbackCategory:id,name',
+                'caseCategories.assignedBy:id,name',
                 'assignments.investigator:id,name,email'
             ])->where('branch_id', $user->branch_id);
 
@@ -197,6 +210,10 @@ class BranchCaseController extends Controller
 
             if ($request->has('priority') && $request->priority !== '') {
                 $query->where('priority', $request->priority);
+            }
+
+            if ($request->has('type') && $request->type !== '') {
+                $query->where('type', $request->type);
             }
 
             if ($request->has('case_type') && $request->case_type !== '') {
@@ -258,8 +275,10 @@ class BranchCaseController extends Controller
             $cases->getCollection()->transform(function ($case) {
                 return [
                     'id' => $case->id,
+                    'case_token' => $case->case_token,
                     'case_number' => $case->case_number,
                     'title' => $case->title,
+                    'type' => $case->type,
                     'case_type' => $case->case_type,
                     'status' => $case->status,
                     'priority' => $case->priority,
@@ -268,8 +287,18 @@ class BranchCaseController extends Controller
                     'company' => $case->company,
                     'branch' => $case->branch,
                     'departments' => $case->departments,
-                    'incident_categories' => $case->incidentCategories,
-                    'feedback_categories' => $case->feedbackCategories,
+                    'categories' => $case->caseCategories->map(function ($caseCategory) {
+                        $category = $caseCategory->category_type === 'incident'
+                            ? $caseCategory->incidentCategory
+                            : $caseCategory->feedbackCategory;
+                        return [
+                            'id' => $category->id ?? null,
+                            'name' => $category->name ?? null,
+                            'type' => $caseCategory->category_type,
+                            'assigned_by' => $caseCategory->assignedBy,
+                            'assigned_at' => $caseCategory->assigned_at
+                        ];
+                    }),
                     'assignments' => $case->assignments,
                     'thread_statistics' => [
                         'total_threads' => (int) $case->thread_count,
@@ -320,9 +349,11 @@ class BranchCaseController extends Controller
                 'company:id,name,email,contact,address',
                 'branch:id,name,location',
                 'departments:id,name,description',
-                'incidentCategories:id,name,description',
-                'feedbackCategories:id,name,description',
+                'caseCategories.incidentCategory:id,name,description',
+                'caseCategories.feedbackCategory:id,name,description',
+                'caseCategories.assignedBy:id,name',
                 'assignments.investigator:id,name,email,phone',
+                'assignments.assignedBy:id,name',
                 'files'
             ])->where('branch_id', $user->branch_id);
 
@@ -362,7 +393,7 @@ class BranchCaseController extends Controller
                 ], 404);
             }
 
-            // Format the response with thread statistics
+            // Format the response with thread statistics and categories
             $caseData = $case->toArray();
             $caseData['thread_statistics'] = [
                 'total_threads' => (int) $case->thread_count,
@@ -374,6 +405,21 @@ class BranchCaseController extends Controller
                 'has_unread_messages' => (int) $case->unread_messages > 0,
                 'has_active_threads' => (int) $case->active_threads > 0
             ];
+
+            // Format categories properly
+            $caseData['categories'] = $case->caseCategories->map(function ($caseCategory) {
+                $category = $caseCategory->category_type === 'incident'
+                    ? $caseCategory->incidentCategory
+                    : $caseCategory->feedbackCategory;
+                return [
+                    'id' => $category->id ?? null,
+                    'name' => $category->name ?? null,
+                    'description' => $category->description ?? null,
+                    'type' => $caseCategory->category_type,
+                    'assigned_by' => $caseCategory->assignedBy,
+                    'assigned_at' => $caseCategory->assigned_at
+                ];
+            });
 
             return response()->json([
                 'success' => true,
@@ -540,7 +586,7 @@ class BranchCaseController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'status' => 'sometimes|in:open,in_progress,pending,resolved,closed',
-                'priority' => 'sometimes|in:low,medium,high,critical',
+                'priority' => 'sometimes|integer|between:1,4',
                 'case_close_classification' => 'required_if:status,closed|in:substantiated,partially_substantiated,unsubstantiated',
                 'resolution_note' => 'required_if:status,closed|string|max:2000',
                 'internal_notes' => 'sometimes|string|max:2000'
@@ -560,6 +606,7 @@ class BranchCaseController extends Controller
                 $updateData['case_close_classification'] = $request->case_close_classification;
                 $updateData['resolution_note'] = $request->resolution_note;
                 $updateData['case_closed_at'] = now();
+                $updateData['closed_by'] = $user->id;
             }
 
             $case->update($updateData);
@@ -568,8 +615,9 @@ class BranchCaseController extends Controller
                 'company:id,name,email',
                 'branch:id,name,location',
                 'departments:id,name',
-                'incidentCategories:id,name',
-                'feedbackCategories:id,name',
+                'caseCategories.incidentCategory:id,name',
+                'caseCategories.feedbackCategory:id,name',
+                'caseCategories.assignedBy:id,name',
                 'assignments.investigator:id,name,email'
             ]);
 
@@ -646,6 +694,8 @@ class BranchCaseController extends Controller
 
             $stats = [
                 'total_cases' => CaseModel::where('branch_id', $branchId)->count(),
+                'incident_cases' => CaseModel::where('branch_id', $branchId)->where('type', 'incident')->count(),
+                'feedback_cases' => CaseModel::where('branch_id', $branchId)->where('type', 'feedback')->count(),
                 'open_cases' => CaseModel::where('branch_id', $branchId)->where('status', 'open')->count(),
                 'in_progress_cases' => CaseModel::where('branch_id', $branchId)->where('status', 'in_progress')->count(),
                 'pending_cases' => CaseModel::where('branch_id', $branchId)->where('status', 'pending')->count(),
@@ -677,6 +727,642 @@ class BranchCaseController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve statistics',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Assign departments to a case.
+     */
+    public function assignDepartments(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only branch admins can assign departments.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'department_ids' => 'required|array|min:1',
+                'department_ids.*' => 'required|string|exists:departments,id'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation errors',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $assignedDepartments = [];
+            foreach ($request->department_ids as $departmentId) {
+                // Check if department belongs to company
+                $department = Department::where('id', $departmentId)
+                    ->where('company_id', $user->company_id)
+                    ->first();
+
+                if (!$department) {
+                    continue;
+                }
+
+                // Check if already assigned
+                $existing = CaseDepartment::where('case_id', $id)
+                    ->where('department_id', $departmentId)
+                    ->first();
+
+                if (!$existing) {
+                    $caseDepartment = CaseDepartment::create([
+                        'case_id' => $id,
+                        'department_id' => $departmentId,
+                        'assigned_by' => $user->id,
+                        'assigned_at' => now()
+                    ]);
+
+                    $caseDepartment->load('department:id,name');
+                    $assignedDepartments[] = $caseDepartment;
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Departments assigned successfully',
+                'data' => $assignedDepartments
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to assign departments',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case departments.
+     */
+    public function getCaseDepartments(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $caseDepartments = CaseDepartment::with(['department:id,name,description', 'assignedBy:id,name'])
+                ->where('case_id', $id)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Case departments retrieved successfully',
+                'data' => $caseDepartments
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case departments',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Remove a department from a case.
+     */
+    public function unassignDepartment(Request $request, string $id, string $departmentId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $caseDepartment = CaseDepartment::where('case_id', $id)
+                ->where('department_id', $departmentId)
+                ->first();
+
+            if (!$caseDepartment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Department assignment not found'
+                ], 404);
+            }
+
+            $caseDepartment->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Department unassigned successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to unassign department',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Assign categories to a case.
+     */
+    public function assignCategories(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only branch admins can assign categories.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            // Determine category type from case type
+            $categoryType = $case->type; // 'incident' or 'feedback'
+
+            $validator = Validator::make($request->all(), [
+                'category_ids' => 'required|array|min:1',
+                'category_ids.*' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation errors',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $assignedCategories = [];
+            foreach ($request->category_ids as $categoryId) {
+                // Verify category exists and belongs to company based on case type
+                if ($categoryType === 'incident') {
+                    $category = IncidentCategory::where('id', $categoryId)
+                        ->where('company_id', $user->company_id)
+                        ->first();
+                } elseif ($categoryType === 'feedback') {
+                    $category = FeedbackCategory::where('id', $categoryId)
+                        ->where('company_id', $user->company_id)
+                        ->first();
+                } else {
+                    // Skip if case type is not incident or feedback
+                    continue;
+                }
+
+                if (!$category) {
+                    continue;
+                }
+
+                // Check if already assigned
+                $existing = CaseCategory::where('case_id', $id)
+                    ->where('category_id', $categoryId)
+                    ->where('category_type', $categoryType)
+                    ->first();
+
+                if (!$existing) {
+                    $caseCategory = CaseCategory::create([
+                        'case_id' => $id,
+                        'category_id' => $categoryId,
+                        'category_type' => $categoryType,
+                        'assigned_by' => $user->id,
+                        'assigned_at' => now()
+                    ]);
+
+                    $assignedCategories[] = $caseCategory;
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Categories assigned successfully',
+                'data' => $assignedCategories
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to assign categories',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case categories.
+     */
+    public function getCaseCategories(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $caseCategories = CaseCategory::with(['assignedBy:id,name'])
+                ->where('case_id', $id)
+                ->get();
+
+            // Load category details based on type
+            $caseCategories->load(['incidentCategory:id,name,description', 'feedbackCategory:id,name,description']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Case categories retrieved successfully',
+                'data' => $caseCategories
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case categories',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Remove a category from a case.
+     */
+    public function unassignCategory(Request $request, string $id, string $categoryId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $caseCategory = CaseCategory::where('case_id', $id)
+                ->where('category_id', $categoryId)
+                ->first();
+
+            if (!$caseCategory) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Category assignment not found'
+                ], 404);
+            }
+
+            $caseCategory->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Category unassigned successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to unassign category',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Assign investigators to a case.
+     */
+    public function assignInvestigators(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only branch admins can assign investigators.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'investigators' => 'required|array|min:1',
+                'investigators.*.investigator_id' => 'required|string|exists:users,id',
+                'investigators.*.assignment_type' => 'sometimes|in:primary,secondary,support,consultant',
+                'investigators.*.priority_level' => 'sometimes|integer|between:1,3',
+                'investigators.*.assignment_note' => 'sometimes|nullable|string|max:500',
+                'investigators.*.estimated_hours' => 'sometimes|nullable|numeric|min:0',
+                'investigators.*.deadline' => 'sometimes|nullable|date'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation errors',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $assignedInvestigators = [];
+            $errors = [];
+
+            foreach ($request->investigators as $investigatorData) {
+                // Verify investigator belongs to company and has investigator role
+                $investigator = User::where('id', $investigatorData['investigator_id'])
+                    ->where('company_id', $user->company_id)
+                    ->where('role', 'investigator')
+                    ->first();
+
+                if (!$investigator) {
+                    $errors[] = "Investigator {$investigatorData['investigator_id']} not found or doesn't belong to your company";
+                    continue;
+                }
+
+                // Check if already assigned and active
+                $existingAssignment = CaseAssignment::where('case_id', $id)
+                    ->where('investigator_id', $investigator->id)
+                    ->where('status', 'active')
+                    ->first();
+
+                if ($existingAssignment) {
+                    $errors[] = "Investigator {$investigator->name} is already assigned to this case";
+                    continue;
+                }
+
+                // Create assignment
+                $assignment = CaseAssignment::create([
+                    'case_id' => $id,
+                    'investigator_id' => $investigator->id,
+                    'assigned_by' => $user->id,
+                    'assigned_at' => now(),
+                    'assignment_type' => $investigatorData['assignment_type'] ?? 'primary',
+                    'priority_level' => $investigatorData['priority_level'] ?? 2,
+                    'assignment_note' => $investigatorData['assignment_note'] ?? null,
+                    'estimated_hours' => $investigatorData['estimated_hours'] ?? null,
+                    'deadline' => isset($investigatorData['deadline']) ? $investigatorData['deadline'] : null,
+                    'status' => 'active'
+                ]);
+
+                $assignment->load(['investigator:id,name,email,phone', 'assignedBy:id,name']);
+                $assignedInvestigators[] = $assignment;
+            }
+
+            // Update case status to "in_progress" if investigators were assigned
+            if (count($assignedInvestigators) > 0 && $case->status === 'open') {
+                $case->update(['status' => 'in_progress']);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => count($assignedInvestigators) > 0
+                    ? 'Investigators assigned successfully'
+                    : 'No investigators were assigned',
+                'data' => [
+                    'assigned' => $assignedInvestigators,
+                    'errors' => $errors
+                ]
+            ], count($assignedInvestigators) > 0 ? 200 : 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to assign investigators',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case investigators.
+     */
+    public function getCaseInvestigators(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $assignments = CaseAssignment::with(['investigator:id,name,email,phone', 'assignedBy:id,name'])
+                ->where('case_id', $id)
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Case investigators retrieved successfully',
+                'data' => $assignments
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case investigators',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Remove an investigator assignment from a case.
+     */
+    public function unassignInvestigator(Request $request, string $id, string $assignmentId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            // Find the assignment
+            $assignment = CaseAssignment::where('id', $assignmentId)
+                ->where('case_id', $id)
+                ->with('investigator')
+                ->first();
+
+            if (!$assignment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Assignment not found'
+                ], 404);
+            }
+
+            // Verify investigator belongs to company
+            if ($assignment->investigator->company_id !== $user->company_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            // Delete the assignment
+            $assignment->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Investigator unassigned successfully'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to unassign investigator',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case files.
+     */
+    public function getCaseFiles(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if ($user->role !== 'branch_admin' || !$user->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)->where('branch_id', $user->branch_id)->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $files = CaseFile::where('case_id', $id)
+                ->select('id', 'original_name', 'file_type', 'file_size', 'description', 'is_confidential', 'created_at')
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Case files retrieved successfully',
+                'data' => $files
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case files',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
