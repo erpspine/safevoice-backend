@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\InvestigatorAllocationController;
 
 // Admin Controllers
 use App\Http\Controllers\Api\Admin\AdminDashboardController;
+use App\Http\Controllers\Api\Admin\IncidentReportController;
 
 // Investigator Controllers
 use App\Http\Controllers\Api\Investigator\InvestigatorAuthController;
@@ -178,6 +179,7 @@ Route::prefix('admin/auth')->group(function () {
         Route::post('logout', [AdminAuthController::class, 'logout'])->name('admin.logout');
         Route::get('me', [AdminAuthController::class, 'me'])->name('admin.me');
         Route::post('refresh', [AdminAuthController::class, 'refresh'])->name('admin.refresh');
+        Route::post('force-logout-all-sessions', [AdminAuthController::class, 'forceLogoutAllSessions'])->name('admin.force-logout-all-sessions');
     });
 });
 
@@ -198,6 +200,9 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
 
     // Dashboard
     Route::get('dashboard', [AdminDashboardController::class, 'dashboard'])->name('admin.dashboard');
+
+    // Reports
+    Route::get('reports/incident', [IncidentReportController::class, 'index'])->name('admin.reports.incident');
 
     // Company Management
     Route::apiResource('companies', CompanyController::class);
@@ -234,6 +239,7 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     // Subscription Plan Management
     Route::apiResource('subscription-plans', SubscriptionPlanController::class);
     Route::get('subscription-plans/{id}/toggle-status', [SubscriptionPlanController::class, 'toggleStatus'])->name('admin.subscription-plans.toggle-status');
+    Route::get('subscription-plans/{id}/pricing', [SubscriptionPlanController::class, 'calculatePricing'])->name('admin.subscription-plans.calculate-pricing');
 
     // Subscription Management
     Route::get('subscriptions/stats', [SubscriptionController::class, 'stats'])->name('admin.subscriptions.stats');

@@ -102,12 +102,14 @@ class CompanyAuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         try {
-            // Revoke current token
-            $request->user()->currentAccessToken()->delete();
+            $user = $request->user();
+
+            // Revoke ALL company tokens for this user (invalidate all sessions)
+            $user->tokens()->where('name', 'like', 'company-token-%')->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Company user logged out successfully'
+                'message' => 'Company user logged out successfully. All sessions have been invalidated.'
             ]);
         } catch (\Exception $e) {
             return response()->json([

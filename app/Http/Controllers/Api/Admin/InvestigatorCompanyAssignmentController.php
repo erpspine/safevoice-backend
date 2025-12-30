@@ -17,6 +17,24 @@ class InvestigatorCompanyAssignmentController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can access investigator assignments.'
+                ], 403);
+            }
+
             $query = Investigator::with(['companies' => function ($query) {
                 $query->select(['companies.*'])
                     ->withPivot(['created_at'])
@@ -66,9 +84,27 @@ class InvestigatorCompanyAssignmentController extends Controller
     /**
      * Get companies assigned to a specific investigator.
      */
-    public function investigatorCompanies(string $investigator): JsonResponse
+    public function investigatorCompanies(Request $request, string $investigator): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can access investigator assignments.'
+                ], 403);
+            }
+
             $investigatorModel = Investigator::findOrFail($investigator);
 
             $companies = $investigatorModel->companies()
@@ -126,9 +162,27 @@ class InvestigatorCompanyAssignmentController extends Controller
     /**
      * Get investigators assigned to a specific company (from investigator perspective).
      */
-    public function companyInvestigators(Company $company): JsonResponse
+    public function companyInvestigators(Request $request, Company $company): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can access investigator assignments.'
+                ], 403);
+            }
+
             $investigators = $company->assignedInvestigators()
                 ->select([
                     'investigators.*',
@@ -175,6 +229,24 @@ class InvestigatorCompanyAssignmentController extends Controller
     public function assign(Request $request, string $investigator): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can assign investigators.'
+                ], 403);
+            }
+
             $investigatorModel = Investigator::findOrFail($investigator);
 
             $request->validate([
@@ -240,6 +312,24 @@ class InvestigatorCompanyAssignmentController extends Controller
     public function unassign(Request $request, string $investigator): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can unassign investigators.'
+                ], 403);
+            }
+
             $investigatorModel = Investigator::findOrFail($investigator);
 
             $request->validate([
@@ -292,9 +382,27 @@ class InvestigatorCompanyAssignmentController extends Controller
     /**
      * Get available companies for assignment to an investigator.
      */
-    public function availableCompanies(string $investigator): JsonResponse
+    public function availableCompanies(Request $request, string $investigator): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can view available companies.'
+                ], 403);
+            }
+
             // Find investigator by ID
             $investigatorModel = Investigator::findOrFail($investigator);
 
@@ -337,9 +445,27 @@ class InvestigatorCompanyAssignmentController extends Controller
     /**
      * Get assignment statistics.
      */
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
         try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can view assignment statistics.'
+                ], 403);
+            }
+
             $stats = [
                 'total_assignments' => \DB::table('investigator_company')->count(),
                 'investigators_with_companies' => Investigator::has('companies')->count(),

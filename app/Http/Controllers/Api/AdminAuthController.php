@@ -101,12 +101,14 @@ class AdminAuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         try {
-            // Revoke current token
-            $request->user()->currentAccessToken()->delete();
+            $user = $request->user();
+
+            // Revoke ALL admin tokens for this user (invalidate all sessions)
+            $user->tokens()->where('name', 'like', 'admin-token-%')->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Admin logged out successfully'
+                'message' => 'Admin logged out successfully. All sessions have been invalidated.'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -166,10 +168,13 @@ class AdminAuthController extends Controller
                 ], 403);
             }
 
-            // Revoke current token
-            $request->user()->currentAccessToken()->delete();
+            // Get current token details before deletion
+            $currentToken = $request->user()->currentAccessToken();
 
-            // Create new token
+            // Revoke current token
+            $currentToken->delete();
+
+            // Create new token with same abilities
             $tokenName = 'admin-token-' . $user->id;
             $token = $user->createToken($tokenName, ['admin'])->plainTextToken;
 
@@ -186,6 +191,37 @@ class AdminAuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Token refresh failed'
+            ], 500);
+        }
+    }
+
+    /**
+     * Force logout all sessions for admin user (used for security purposes)
+     * This is called when password is changed or admin account needs to be secured
+     */
+    public function forceLogoutAllSessions(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user->isAdmin()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized access'
+                ], 403);
+            }
+
+            // Invalidate ALL tokens for this admin user
+            $user->tokens()->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'All sessions have been invalidated. Please log in again.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to invalidate sessions'
             ], 500);
         }
     }

@@ -347,14 +347,24 @@ class UserController extends Controller
                 }
             }
 
+            // Check if status is being changed to inactive - if so, invalidate all sessions
+            $statusChangingToInactive = $request->has('status') &&
+                $request->status === 'inactive' &&
+                $user->status !== 'inactive';
+
             $user->update($request->all());
+
+            // Invalidate all tokens if user is being deactivated
+            if ($statusChangingToInactive) {
+                $user->tokens()->delete();
+            }
 
             // Commit the transaction
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'User updated successfully',
+                'message' => 'User updated successfully' . ($statusChangingToInactive ? '. All sessions have been invalidated.' : ''),
                 'data' => [
                     'user' => $user->fresh()->load(['company:id,name', 'branch:id,name'])
                 ]
@@ -398,11 +408,14 @@ class UserController extends Controller
                 }
             }
 
+            // Invalidate all tokens for this user before deletion
+            $user->tokens()->delete();
+
             $user->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'User deleted successfully'
+                'message' => 'User deleted successfully. All sessions have been invalidated.'
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -446,6 +459,9 @@ class UserController extends Controller
                 'password' => Hash::make($temporaryPassword),
             ]);
 
+            // Invalidate all existing tokens for this user (security measure for password change)
+            $user->tokens()->delete();
+
             // Determine if admin user
             $isAdminUser = in_array($user->role, ['super_admin', 'admin']);
 
@@ -465,7 +481,7 @@ class UserController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Invitation resent successfully and queued',
+                'message' => 'Invitation resent successfully and queued. All previous sessions have been invalidated.',
                 'data' => [
                     'invitation_expires_at' => $user->invitation_expires_at,
                     'email_invitation_queued' => $emailQueued,

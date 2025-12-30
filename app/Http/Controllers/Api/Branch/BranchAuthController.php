@@ -135,12 +135,12 @@ class BranchAuthController extends Controller
                 ], 401);
             }
 
-            // Revoke current token
-            $request->user()->currentAccessToken()->delete();
+            // Revoke ALL branch tokens for this user (invalidate all sessions)
+            $user->tokens()->where('name', 'like', 'branch-token-%')->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Logout successful'
+                'message' => 'Logout successful. All sessions have been invalidated.'
             ]);
         } catch (\Exception $e) {
             return response()->json([

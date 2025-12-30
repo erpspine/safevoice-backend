@@ -219,18 +219,20 @@ class InvestigatorAuthController extends Controller
     public function logout(Request $request)
     {
         try {
+            $user = $request->user();
+
             // Log the logout attempt
             Log::info('Investigator logout', [
-                'user_id' => $request->user()->id,
-                'email' => $request->user()->email,
+                'user_id' => $user->id,
+                'email' => $user->email,
             ]);
 
-            // Revoke the current token
-            $request->user()->currentAccessToken()->delete();
+            // Revoke ALL investigator tokens for this user (invalidate all sessions)
+            $user->tokens()->where('name', 'like', 'investigator-auth-token')->delete();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Logout successful'
+                'message' => 'Logout successful. All sessions have been invalidated.'
             ], 200);
         } catch (\Exception $e) {
             Log::error('Investigator logout error', [
