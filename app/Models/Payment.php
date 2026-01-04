@@ -47,6 +47,14 @@ class Payment extends Model
     }
 
     /**
+     * Get the subscription that this payment is for.
+     */
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
+    /**
      * Scope a query to only include successful payments.
      */
     public function scopeCompleted($query)

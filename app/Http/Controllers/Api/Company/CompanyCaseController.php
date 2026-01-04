@@ -11,10 +11,15 @@ use App\Models\Department;
 use App\Models\IncidentCategory;
 use App\Models\FeedbackCategory;
 use App\Models\User;
+use App\Mail\InvestigatorAssignedToCase;
+use App\Mail\InvestigatorRemovedFromCase;
+use App\Services\CaseTrackingService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class CompanyCaseController extends Controller
 {
@@ -42,7 +47,9 @@ class CompanyCaseController extends Controller
                 ], 403);
             }
 
-            $query = CaseModel::where('company_id', $user->company_id);
+            $companyId = $user->company_id;
+
+            $query = CaseModel::where('company_id', $companyId);
 
             // Apply filters
             if ($request->filled('status')) {
@@ -101,9 +108,13 @@ class CompanyCaseController extends Controller
                 ->orderBy('created_at', 'desc')
                 ->get();
 
+            // Calculate statistics for the company
+            $statistics = $this->calculateCompanyCaseStatistics($companyId);
+
             return response()->json([
                 'success' => true,
-                'data' => $cases
+                'data' => $cases,
+                'statistics' => $statistics
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -112,6 +123,152 @@ class CompanyCaseController extends Controller
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
+    }
+
+    /**
+     * Calculate case statistics for the company.
+     */
+    private function calculateCompanyCaseStatistics(string $companyId): array
+    {
+        // Total cases
+        $totalCases = CaseModel::where('company_id', $companyId)->count();
+
+        // Cases by status
+        $byStatus = CaseModel::where('company_id', $companyId)
+            ->select('status', DB::raw('count(*) as count'))
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+
+        // Cases by type (incident vs feedback)
+        $byType = CaseModel::where('company_id', $companyId)
+            ->select('type', DB::raw('count(*) as count'))
+            ->groupBy('type')
+            ->pluck('count', 'type')
+            ->toArray();
+
+        // Cases with/without investigators
+        $casesWithInvestigators = CaseModel::where('company_id', $companyId)
+            ->whereHas('assignments', function ($q) {
+                $q->where('status', 'active');
+            })
+            ->count();
+
+        $casesWithoutInvestigators = $totalCases - $casesWithInvestigators;
+
+        // Cases with/without departments
+        $casesWithDepartments = CaseModel::where('company_id', $companyId)
+            ->whereHas('departments')
+            ->count();
+
+        $casesWithoutDepartments = $totalCases - $casesWithDepartments;
+
+        // Cases with/without categories
+        $casesWithCategories = CaseModel::where('company_id', $companyId)
+            ->whereHas('caseCategories')
+            ->count();
+
+        $casesWithoutCategories = $totalCases - $casesWithCategories;
+
+        // Cases by department (top 10)
+        $byDepartment = DB::table('cases')
+            ->join('case_departments', 'cases.id', '=', 'case_departments.case_id')
+            ->join('departments', 'case_departments.department_id', '=', 'departments.id')
+            ->where('cases.company_id', $companyId)
+            ->whereNull('case_departments.deleted_at')
+            ->whereNull('cases.deleted_at')
+            ->select('departments.id', 'departments.name', DB::raw('count(*) as count'))
+            ->groupBy('departments.id', 'departments.name')
+            ->orderByDesc('count')
+            ->limit(10)
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'count' => $item->count
+                ];
+            })
+            ->toArray();
+
+        // Cases by category (top 10)
+        $byCategory = DB::table('cases')
+            ->join('case_categories', 'cases.id', '=', 'case_categories.case_id')
+            ->leftJoin('incident_categories', 'case_categories.category_id', '=', 'incident_categories.id')
+            ->leftJoin('feedback_categories', 'case_categories.category_id', '=', 'feedback_categories.id')
+            ->where('cases.company_id', $companyId)
+            ->whereNull('case_categories.deleted_at')
+            ->whereNull('cases.deleted_at')
+            ->select(
+                'case_categories.category_id as id',
+                'case_categories.category_type as type',
+                DB::raw('COALESCE(incident_categories.name, feedback_categories.name) as name'),
+                DB::raw('count(*) as count')
+            )
+            ->groupBy('case_categories.category_id', 'case_categories.category_type', 'incident_categories.name', 'feedback_categories.name')
+            ->orderByDesc('count')
+            ->limit(10)
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'type' => $item->type,
+                    'count' => $item->count
+                ];
+            })
+            ->toArray();
+
+        // Cases by branch
+        $byBranch = DB::table('cases')
+            ->join('branches', 'cases.branch_id', '=', 'branches.id')
+            ->where('cases.company_id', $companyId)
+            ->whereNull('cases.deleted_at')
+            ->select('branches.id', 'branches.name', DB::raw('count(*) as count'))
+            ->groupBy('branches.id', 'branches.name')
+            ->orderByDesc('count')
+            ->limit(10)
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'name' => $item->name,
+                    'count' => $item->count
+                ];
+            })
+            ->toArray();
+
+        // Priority breakdown
+        $byPriority = CaseModel::where('company_id', $companyId)
+            ->select('priority', DB::raw('count(*) as count'))
+            ->groupBy('priority')
+            ->pluck('count', 'priority')
+            ->toArray();
+
+        return [
+            'total_cases' => $totalCases,
+            'by_status' => $byStatus,
+            'by_type' => [
+                'incident' => $byType['incident'] ?? 0,
+                'feedback' => $byType['feedback'] ?? 0
+            ],
+            'by_priority' => $byPriority,
+            'investigator_assignment' => [
+                'assigned' => $casesWithInvestigators,
+                'not_assigned' => $casesWithoutInvestigators
+            ],
+            'department_assignment' => [
+                'assigned' => $casesWithDepartments,
+                'not_assigned' => $casesWithoutDepartments
+            ],
+            'category_assignment' => [
+                'assigned' => $casesWithCategories,
+                'not_assigned' => $casesWithoutCategories
+            ],
+            'by_department' => $byDepartment,
+            'by_category' => $byCategory,
+            'by_branch' => $byBranch
+        ];
     }
 
     /**
@@ -638,6 +795,7 @@ class CompanyCaseController extends Controller
 
     /**
      * Get available investigators for assignment.
+     * Returns both internal (branch/company admins) and external (investigator role) investigators.
      */
     public function availableInvestigators(Request $request): JsonResponse
     {
@@ -660,17 +818,72 @@ class CompanyCaseController extends Controller
                 ], 403);
             }
 
-            // Get investigators from the same company
-            $investigators = User::where('company_id', $user->company_id)
-                ->where('role', 'investigator')
+            // Get case_id if provided (to filter out involved persons)
+            $caseId = $request->query('case_id');
+            $case = null;
+            if ($caseId) {
+                $case = CaseModel::where('id', $caseId)->where('company_id', $user->company_id)->first();
+            }
+
+            // Internal investigators: branch_admins across all company branches
+            $internalQuery = User::where('company_id', $user->company_id)
+                ->where('role', User::ROLE_BRANCH_ADMIN)
                 ->where('status', 'active')
+                ->where('id', '!=', $user->id);
+
+            // If case provided, exclude involved persons
+            if ($case) {
+                // Exclude submitter
+                if ($case->submitted_by) {
+                    $internalQuery->where('id', '!=', $case->submitted_by);
+                }
+
+                // Exclude named persons by email
+                $namedPersons = is_array($case->named_persons) ? $case->named_persons : [];
+                $namedEmails = collect($namedPersons)->pluck('email')->filter()->map('strtolower')->toArray();
+                if (!empty($namedEmails)) {
+                    $internalQuery->whereRaw('LOWER(email) NOT IN (' . implode(',', array_fill(0, count($namedEmails), '?')) . ')', $namedEmails);
+                }
+            }
+
+            $internalInvestigators = $internalQuery
+                ->select('id', 'name', 'email', 'phone', 'branch_id')
+                ->with('branch:id,name')
+                ->orderBy('name')
+                ->get()
+                ->map(function ($admin) use ($user) {
+                    $activeCases = CaseAssignment::where('investigator_id', $admin->id)
+                        ->where('status', 'active')
+                        ->count();
+
+                    return [
+                        'id' => $admin->id,
+                        'name' => $admin->name,
+                        'email' => $admin->email,
+                        'phone' => $admin->phone,
+                        'branch_id' => $admin->branch_id,
+                        'branch_name' => $admin->branch?->name,
+                        'active_cases' => $activeCases,
+                        'investigator_type' => 'internal'
+                    ];
+                });
+
+            // External investigators: users with investigator role assigned to this company via pivot
+            $companyId = $user->company_id;
+            $externalInvestigators = User::where('role', 'investigator')
+                ->where('status', 'active')
+                ->whereHas('investigator', function ($q) use ($companyId) {
+                    $q->where('status', true)
+                        ->whereHas('companies', function ($q2) use ($companyId) {
+                            $q2->where('companies.id', $companyId);
+                        });
+                })
                 ->select('id', 'name', 'email', 'phone')
                 ->orderBy('name')
                 ->get()
                 ->map(function ($investigator) use ($user) {
-                    $activeCases = CaseModel::where('assigned_to', $investigator->id)
-                        ->where('company_id', $user->company_id)
-                        ->whereIn('status', ['open', 'in_progress', 'pending'])
+                    $activeCases = CaseAssignment::where('investigator_id', $investigator->id)
+                        ->where('status', 'active')
                         ->count();
 
                     return [
@@ -678,13 +891,21 @@ class CompanyCaseController extends Controller
                         'name' => $investigator->name,
                         'email' => $investigator->email,
                         'phone' => $investigator->phone,
-                        'active_cases' => $activeCases
+                        'active_cases' => $activeCases,
+                        'investigator_type' => 'external'
                     ];
                 });
 
             return response()->json([
                 'success' => true,
-                'data' => $investigators
+                'data' => [
+                    'internal_investigators' => $internalInvestigators,
+                    'external_investigators' => $externalInvestigators,
+                    'total_available' => [
+                        'internal' => $internalInvestigators->count(),
+                        'external' => $externalInvestigators->count()
+                    ]
+                ]
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -730,81 +951,16 @@ class CompanyCaseController extends Controller
                 ], 404);
             }
 
-            // Build timeline
-            $timeline = [
-                [
-                    'stage' => 'Submitted',
-                    'status' => 'completed',
-                    'date' => $case->created_at,
-                    'description' => 'Case submitted to the system'
-                ]
-            ];
-
-            // Check assignment
-            if ($case->assigned_to) {
-                $timeline[] = [
-                    'stage' => 'Assigned',
-                    'status' => 'completed',
-                    'date' => $case->updated_at,
-                    'description' => 'Case assigned to investigator',
-                    'assignee' => $case->assignee ? $case->assignee->name : 'Unknown'
-                ];
-            } else {
-                $timeline[] = [
-                    'stage' => 'Assignment Pending',
-                    'status' => 'pending',
-                    'date' => null,
-                    'description' => 'Awaiting investigator assignment'
-                ];
-            }
-
-            // Check investigation status
-            if ($case->status === 'in_progress') {
-                $timeline[] = [
-                    'stage' => 'Under Investigation',
-                    'status' => 'active',
-                    'date' => $case->updated_at,
-                    'description' => 'Case is being investigated'
-                ];
-            } elseif ($case->status === 'open') {
-                $timeline[] = [
-                    'stage' => 'Investigation',
-                    'status' => 'pending',
-                    'date' => null,
-                    'description' => 'Investigation not yet started'
-                ];
-            } else {
-                $timeline[] = [
-                    'stage' => 'Investigation',
-                    'status' => 'completed',
-                    'date' => $case->updated_at,
-                    'description' => 'Investigation completed'
-                ];
-            }
-
-            // Check resolution status
-            if (in_array($case->status, ['resolved', 'closed'])) {
-                $timeline[] = [
-                    'stage' => 'Closed',
-                    'status' => 'completed',
-                    'date' => $case->resolved_at,
-                    'description' => 'Case has been ' . $case->status,
-                    'resolution_note' => $case->resolution_note
-                ];
-            } else {
-                $timeline[] = [
-                    'stage' => 'Resolution',
-                    'status' => 'pending',
-                    'date' => null,
-                    'description' => 'Case not yet resolved'
-                ];
-            }
+            $trackingService = app(CaseTrackingService::class);
+            $includeInternal = $request->boolean('include_internal', true);
+            $timeline = $trackingService->getTimeline($case, $includeInternal);
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'case_id' => $case->id,
-                    'case_number' => $case->case_token,
+                    'case_token' => $case->case_token,
+                    'case_title' => $case->title,
                     'current_status' => $case->status,
                     'timeline' => $timeline
                 ]
@@ -813,6 +969,234 @@ class CompanyCaseController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve case timeline',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case duration summary.
+     */
+    public function getDurationSummary(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user || $user->role !== 'company_admin' || !$user->company_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only company admins can view case duration.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)
+                ->where('company_id', $user->company_id)
+                ->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $trackingService = app(CaseTrackingService::class);
+            $summary = $trackingService->getDurationSummary($case);
+
+            return response()->json([
+                'success' => true,
+                'data' => array_merge([
+                    'case_id' => $case->id,
+                    'case_token' => $case->case_token,
+                    'case_title' => $case->title,
+                ], $summary)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve duration summary',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get case escalations.
+     */
+    public function getCaseEscalations(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user || $user->role !== 'company_admin' || !$user->company_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only company admins can view case escalations.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)
+                ->where('company_id', $user->company_id)
+                ->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $escalations = \App\Models\CaseEscalation::where('case_id', $id)
+                ->with(['escalationRule', 'resolvedBy', 'reassignedTo'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'case_id' => $case->id,
+                    'case_token' => $case->case_token,
+                    'case_title' => $case->title,
+                    'escalations' => $escalations->map(function ($escalation) {
+                        return [
+                            'id' => $escalation->id,
+                            'stage' => $escalation->stage,
+                            'escalation_level' => $escalation->escalation_level,
+                            'level_label' => $escalation->getLevelLabel(),
+                            'reason' => $escalation->reason,
+                            'overdue_duration' => $escalation->getFormattedOverdueDuration(),
+                            'is_resolved' => $escalation->is_resolved,
+                            'resolved_at' => $escalation->resolved_at?->toISOString(),
+                            'resolved_by' => $escalation->resolvedBy ? [
+                                'id' => $escalation->resolvedBy->id,
+                                'name' => $escalation->resolvedBy->name,
+                            ] : null,
+                            'resolution_note' => $escalation->resolution_note,
+                            'was_reassigned' => $escalation->was_reassigned,
+                            'reassigned_to' => $escalation->reassignedTo ? [
+                                'id' => $escalation->reassignedTo->id,
+                                'name' => $escalation->reassignedTo->name,
+                            ] : null,
+                            'priority_changed' => $escalation->priority_changed,
+                            'old_priority' => $escalation->old_priority,
+                            'new_priority' => $escalation->new_priority,
+                            'rule' => $escalation->escalationRule ? [
+                                'id' => $escalation->escalationRule->id,
+                                'name' => $escalation->escalationRule->name,
+                            ] : null,
+                            'created_at' => $escalation->created_at->toISOString(),
+                        ];
+                    }),
+                    'unresolved_count' => $escalations->where('is_resolved', false)->count(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case escalations',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get full case tracking details (timeline + duration + escalations).
+     */
+    public function getFullTracking(Request $request, string $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user || $user->role !== 'company_admin' || !$user->company_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only company admins can view case tracking.'
+                ], 403);
+            }
+
+            $case = CaseModel::where('id', $id)
+                ->where('company_id', $user->company_id)
+                ->with(['company:id,name', 'branch:id,name', 'assignee:id,name,email'])
+                ->first();
+
+            if (!$case) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Case not found or access denied'
+                ], 404);
+            }
+
+            $trackingService = app(CaseTrackingService::class);
+            
+            // Get timeline
+            $includeInternal = $request->boolean('include_internal', true);
+            $timeline = $trackingService->getTimeline($case, $includeInternal);
+            
+            // Get duration summary
+            $durationSummary = $trackingService->getDurationSummary($case);
+            
+            // Get current stage
+            $currentStage = $trackingService->getCurrentStage($case);
+            
+            // Get escalations
+            $escalations = \App\Models\CaseEscalation::where('case_id', $id)
+                ->with(['escalationRule:id,name', 'resolvedBy:id,name'])
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($escalation) {
+                    return [
+                        'id' => $escalation->id,
+                        'stage' => $escalation->stage,
+                        'level_label' => $escalation->getLevelLabel(),
+                        'reason' => $escalation->reason,
+                        'overdue_duration' => $escalation->getFormattedOverdueDuration(),
+                        'is_resolved' => $escalation->is_resolved,
+                        'resolved_at' => $escalation->resolved_at?->toISOString(),
+                        'resolved_by' => $escalation->resolvedBy?->name,
+                        'created_at' => $escalation->created_at->toISOString(),
+                    ];
+                });
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'case' => [
+                        'id' => $case->id,
+                        'case_token' => $case->case_token,
+                        'title' => $case->title,
+                        'type' => $case->type,
+                        'status' => $case->status,
+                        'priority' => $case->priority,
+                        'company' => $case->company ? [
+                            'id' => $case->company->id,
+                            'name' => $case->company->name,
+                        ] : null,
+                        'branch' => $case->branch ? [
+                            'id' => $case->branch->id,
+                            'name' => $case->branch->name,
+                        ] : null,
+                        'assignee' => $case->assignee ? [
+                            'id' => $case->assignee->id,
+                            'name' => $case->assignee->name,
+                            'email' => $case->assignee->email,
+                        ] : null,
+                        'created_at' => $case->created_at->toISOString(),
+                        'resolved_at' => $case->resolved_at?->toISOString(),
+                    ],
+                    'current_stage' => $currentStage,
+                    'timeline' => $timeline,
+                    'duration' => $durationSummary,
+                    'escalations' => [
+                        'list' => $escalations,
+                        'total' => $escalations->count(),
+                        'unresolved' => $escalations->where('is_resolved', false)->count(),
+                    ],
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve case tracking',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
@@ -1416,6 +1800,7 @@ class CompanyCaseController extends Controller
 
     /**
      * Assign investigators to a case.
+     * Supports both internal (branch_admin) and external (investigator role) investigators.
      */
     public function assignInvestigators(Request $request, string $id): JsonResponse
     {
@@ -1454,7 +1839,9 @@ class CompanyCaseController extends Controller
             $validator = Validator::make($request->all(), [
                 'investigators' => 'required|array|min:1',
                 'investigators.*.investigator_id' => 'required|ulid|exists:users,id',
+                'investigators.*.investigator_type' => 'required|in:internal,external',
                 'investigators.*.assignment_type' => 'sometimes|in:primary,secondary,support,consultant',
+                'investigators.*.is_lead' => 'sometimes|boolean',
                 'investigators.*.priority_level' => 'sometimes|integer|between:1,3',
                 'investigators.*.assignment_note' => 'sometimes|nullable|string|max:500',
                 'investigators.*.estimated_hours' => 'sometimes|nullable|numeric|min:0',
@@ -1469,21 +1856,65 @@ class CompanyCaseController extends Controller
                 ], 422);
             }
 
+            // Validate that only one lead investigator is assigned
+            $leadCount = collect($request->investigators)->where('is_lead', true)->count();
+            if ($leadCount > 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only one lead investigator can be assigned per case'
+                ], 422);
+            }
+
             DB::beginTransaction();
 
             $assignedInvestigators = [];
             $errors = [];
 
             foreach ($request->investigators as $investigatorData) {
-                // Verify investigator belongs to company and has investigator role
-                $investigator = User::where('id', $investigatorData['investigator_id'])
-                    ->where('company_id', $user->company_id)
-                    ->where('role', 'investigator')
-                    ->first();
+                $investigatorType = $investigatorData['investigator_type'];
+                $investigator = null;
+                $internalSource = null;
 
-                if (!$investigator) {
-                    $errors[] = "Investigator {$investigatorData['investigator_id']} not found or doesn't belong to your company";
-                    continue;
+                if ($investigatorType === 'internal') {
+                    // Internal: branch_admin from any branch in the company who is NOT involved in the case
+                    $investigator = User::where('id', $investigatorData['investigator_id'])
+                        ->where('company_id', $user->company_id)
+                        ->where('role', User::ROLE_BRANCH_ADMIN)
+                        ->where('status', 'active')
+                        ->first();
+
+                    if (!$investigator) {
+                        $errors[] = "Internal investigator {$investigatorData['investigator_id']} not found or not a branch admin in your company";
+                        continue;
+                    }
+
+                    // Check they're not involved in the case (reporter or named)
+                    if ($case->submitted_by === $investigator->id) {
+                        $errors[] = "{$investigator->name} cannot be assigned as they submitted this case";
+                        continue;
+                    }
+
+                    // Check named_persons
+                    $namedPersons = is_array($case->named_persons) ? $case->named_persons : [];
+                    $namedEmails = collect($namedPersons)->pluck('email')->filter()->map('strtolower')->toArray();
+                    if (in_array(strtolower($investigator->email), $namedEmails)) {
+                        $errors[] = "{$investigator->name} cannot be assigned as they are named in this case";
+                        continue;
+                    }
+
+                    $internalSource = 'branch_admin';
+                } else {
+                    // External: investigator role assigned to company
+                    $investigator = User::where('id', $investigatorData['investigator_id'])
+                        ->where('company_id', $user->company_id)
+                        ->where('role', 'investigator')
+                        ->where('status', 'active')
+                        ->first();
+
+                    if (!$investigator) {
+                        $errors[] = "External investigator {$investigatorData['investigator_id']} not found or doesn't belong to your company";
+                        continue;
+                    }
                 }
 
                 // Check if already assigned and active
@@ -1497,12 +1928,24 @@ class CompanyCaseController extends Controller
                     continue;
                 }
 
+                // If assigning as lead, remove lead status from existing lead
+                $isLead = $investigatorData['is_lead'] ?? false;
+                if ($isLead) {
+                    CaseAssignment::where('case_id', $id)
+                        ->where('is_lead_investigator', true)
+                        ->where('status', 'active')
+                        ->update(['is_lead_investigator' => false]);
+                }
+
                 // Create assignment
                 $assignment = CaseAssignment::create([
                     'case_id' => $id,
                     'investigator_id' => $investigator->id,
                     'assigned_by' => $user->id,
                     'assigned_at' => now(),
+                    'investigator_type' => $investigatorType,
+                    'is_lead_investigator' => $isLead,
+                    'internal_source' => $internalSource,
                     'assignment_type' => $investigatorData['assignment_type'] ?? 'primary',
                     'priority_level' => $investigatorData['priority_level'] ?? 2,
                     'assignment_note' => $investigatorData['assignment_note'] ?? null,
@@ -1511,8 +1954,11 @@ class CompanyCaseController extends Controller
                     'status' => 'active'
                 ]);
 
-                $assignment->load(['investigator:id,name,email,phone', 'assignedBy:id,name']);
-                $assignedInvestigators[] = $assignment;
+                $assignment->load(['investigator:id,name,email,phone,role', 'assignedBy:id,name']);
+                $assignedInvestigators[] = [
+                    'assignment' => $assignment,
+                    'investigator' => $investigator
+                ];
             }
 
             // Update case status to "in_progress" if investigators were assigned
@@ -1522,13 +1968,66 @@ class CompanyCaseController extends Controller
 
             DB::commit();
 
+            // Send email notifications and log timeline events (after commit)
+            $caseTrackingService = app(CaseTrackingService::class);
+            $case->load(['company', 'branch']);
+
+            foreach ($assignedInvestigators as $assignmentData) {
+                $assignment = $assignmentData['assignment'];
+                $investigator = $assignmentData['investigator'];
+
+                // Log timeline event
+                try {
+                    $caseTrackingService->logCaseAssigned(
+                        $case,
+                        $investigator,
+                        $user,
+                        false,
+                        [
+                            'investigator_type' => $assignment->investigator_type,
+                            'is_lead' => $assignment->is_lead_investigator,
+                            'assignment_type' => $assignment->assignment_type,
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    Log::warning('Failed to log case assignment timeline event', [
+                        'case_id' => $case->id,
+                        'investigator_id' => $investigator->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+
+                // Send email notification
+                try {
+                    Mail::to($investigator->email)->queue(
+                        new InvestigatorAssignedToCase($case, $investigator, $user, $assignment)
+                    );
+                } catch (\Exception $e) {
+                    Log::warning('Failed to send investigator assignment email', [
+                        'case_id' => $case->id,
+                        'investigator_id' => $investigator->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            // Summary of assignments
+            $assignments = collect($assignedInvestigators)->pluck('assignment');
+            $internalCount = $assignments->where('investigator_type', 'internal')->count();
+            $externalCount = $assignments->where('investigator_type', 'external')->count();
+
             return response()->json([
                 'success' => true,
                 'message' => count($assignedInvestigators) > 0
                     ? 'Investigators assigned successfully'
                     : 'No investigators were assigned',
                 'data' => [
-                    'assigned' => $assignedInvestigators,
+                    'assigned' => $assignments->values(),
+                    'summary' => [
+                        'total_assigned' => count($assignedInvestigators),
+                        'internal_investigators' => $internalCount,
+                        'external_investigators' => $externalCount
+                    ],
                     'errors' => $errors
                 ]
             ], count($assignedInvestigators) > 0 ? 200 : 422);
@@ -1569,6 +2068,7 @@ class CompanyCaseController extends Controller
             // Verify case exists and belongs to company
             $case = CaseModel::where('id', $id)
                 ->where('company_id', $user->company_id)
+                ->with(['company', 'branch'])
                 ->first();
 
             if (!$case) {
@@ -1577,6 +2077,9 @@ class CompanyCaseController extends Controller
                     'message' => 'Case not found or access denied'
                 ], 404);
             }
+
+            // Optional reason for removal
+            $removalReason = $request->input('reason');
 
             // Find the assignment
             $assignment = CaseAssignment::where('id', $assignmentId)
@@ -1591,25 +2094,66 @@ class CompanyCaseController extends Controller
                 ], 404);
             }
 
-            // Verify investigator belongs to company
-            if ($assignment->investigator->company_id !== $user->company_id) {
+            $investigator = $assignment->investigator;
+
+            // Verify investigator exists
+            if (!$investigator) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied'
-                ], 403);
+                    'message' => 'Investigator not found'
+                ], 404);
             }
 
             DB::beginTransaction();
+
+            // Store investigator info before deletion
+            $investigatorName = $investigator->name;
+            $investigatorEmail = $investigator->email;
+            $investigatorType = $assignment->investigator_type;
 
             // Delete the assignment completely
             $assignment->delete();
 
             DB::commit();
 
+            // Log timeline event (after commit)
+            try {
+                $caseTrackingService = app(CaseTrackingService::class);
+                $caseTrackingService->logInvestigatorUnassigned(
+                    $case,
+                    $investigator,
+                    $user,
+                    $removalReason
+                );
+            } catch (\Exception $e) {
+                Log::warning('Failed to log investigator unassignment timeline event', [
+                    'case_id' => $case->id,
+                    'investigator_id' => $investigator->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            // Send email notification
+            try {
+                Mail::to($investigatorEmail)->queue(
+                    new InvestigatorRemovedFromCase($case, $investigator, $user, $removalReason)
+                );
+            } catch (\Exception $e) {
+                Log::warning('Failed to send investigator removal email', [
+                    'case_id' => $case->id,
+                    'investigator_email' => $investigatorEmail,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Investigator unassigned successfully',
-                'data' => $assignment->load('unassignedBy:id,name')
+                'data' => [
+                    'investigator_name' => $investigatorName,
+                    'investigator_type' => $investigatorType,
+                    'removal_reason' => $removalReason
+                ]
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -1622,7 +2166,7 @@ class CompanyCaseController extends Controller
     }
 
     /**
-     * Get all investigator assignments for a case.
+     * Get all investigator assignments for a case with type information.
      */
     public function getCaseInvestigators(Request $request, string $id): JsonResponse
     {
@@ -1660,7 +2204,7 @@ class CompanyCaseController extends Controller
             // Get assignments with filters
             $query = CaseAssignment::where('case_id', $id)
                 ->with([
-                    'investigator:id,name,email,phone',
+                    'investigator:id,name,email,phone,role',
                     'assignedBy:id,name',
                     'unassignedBy:id,name'
                 ]);
@@ -1673,16 +2217,34 @@ class CompanyCaseController extends Controller
                 $query->where('status', 'active');
             }
 
+            // Filter by investigator type if provided
+            if ($request->filled('investigator_type')) {
+                $query->where('investigator_type', $request->investigator_type);
+            }
+
             $assignments = $query->orderBy('assigned_at', 'desc')->get();
+
+            // Group by type for easier frontend consumption
+            $internalAssignments = $assignments->where('investigator_type', 'internal')->values();
+            $externalAssignments = $assignments->where('investigator_type', 'external')->values();
+            $leadInvestigator = $assignments->where('is_lead_investigator', true)->first();
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'case_id' => $id,
                     'case_token' => $case->case_token,
-                    'assignments' => $assignments,
-                    'total_assignments' => $assignments->count(),
-                    'active_count' => $assignments->where('status', 'active')->count()
+                    'all_assignments' => $assignments,
+                    'internal_investigators' => $internalAssignments,
+                    'external_investigators' => $externalAssignments,
+                    'lead_investigator' => $leadInvestigator,
+                    'summary' => [
+                        'total' => $assignments->count(),
+                        'active' => $assignments->where('status', 'active')->count(),
+                        'internal_count' => $internalAssignments->count(),
+                        'external_count' => $externalAssignments->count(),
+                        'has_lead' => $leadInvestigator !== null
+                    ]
                 ]
             ]);
         } catch (\Exception $e) {

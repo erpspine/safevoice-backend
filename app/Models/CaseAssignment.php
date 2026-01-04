@@ -14,9 +14,14 @@ class CaseAssignment extends BaseModel
      *
      * @var array<int, string>
      */
+    // Investigator types
+    public const TYPE_INTERNAL = 'internal'; // Branch admins not involved in case
+    public const TYPE_EXTERNAL = 'external'; // Investigators assigned to company
+
     protected $fillable = [
         'case_id',
         'investigator_id',
+        'investigator_type',
         'assigned_by',
         'assigned_at',
         'unassigned_at',
@@ -100,6 +105,30 @@ class CaseAssignment extends BaseModel
     }
 
     /**
+     * Scope a query to filter by investigator type (internal/external).
+     */
+    public function scopeOfType($query, string $type)
+    {
+        return $query->where('investigator_type', $type);
+    }
+
+    /**
+     * Scope a query to get internal investigators only.
+     */
+    public function scopeInternal($query)
+    {
+        return $query->where('investigator_type', self::TYPE_INTERNAL);
+    }
+
+    /**
+     * Scope a query to get external investigators only.
+     */
+    public function scopeExternal($query)
+    {
+        return $query->where('investigator_type', self::TYPE_EXTERNAL);
+    }
+
+    /**
      * Scope a query to get assignments by priority.
      */
     public function scopeByPriority($query, $priority)
@@ -122,6 +151,34 @@ class CaseAssignment extends BaseModel
     public function isActive(): bool
     {
         return $this->status === 'active' && $this->unassigned_at === null;
+    }
+
+    /**
+     * Check if this is an internal investigator (branch admin).
+     */
+    public function isInternal(): bool
+    {
+        return $this->investigator_type === self::TYPE_INTERNAL;
+    }
+
+    /**
+     * Check if this is an external investigator.
+     */
+    public function isExternal(): bool
+    {
+        return $this->investigator_type === self::TYPE_EXTERNAL;
+    }
+
+    /**
+     * Get investigator type label.
+     */
+    public function getInvestigatorTypeLabel(): string
+    {
+        return match ($this->investigator_type) {
+            self::TYPE_INTERNAL => 'Internal (Branch Admin)',
+            self::TYPE_EXTERNAL => 'External Investigator',
+            default => ucfirst($this->investigator_type),
+        };
     }
 
     /**

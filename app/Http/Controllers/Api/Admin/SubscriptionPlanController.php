@@ -278,9 +278,18 @@ class SubscriptionPlanController extends Controller
             $plans = SubscriptionPlan::active()
                 ->orderByPrice()
                 ->select([
-                    'id', 'name', 'price', 'billing_period', 'yearly_price',
-                    'discount_percentage', 'discount_amount', 'amount_saved',
-                    'currency', 'grace_days', 'description', 'max_branches'
+                    'id',
+                    'name',
+                    'price',
+                    'billing_period',
+                    'yearly_price',
+                    'discount_percentage',
+                    'discount_amount',
+                    'amount_saved',
+                    'currency',
+                    'grace_days',
+                    'description',
+                    'max_branches'
                 ])
                 ->get()
                 ->map(function ($plan) {

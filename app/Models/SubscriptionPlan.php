@@ -161,7 +161,7 @@ class SubscriptionPlan extends BaseModel
     public function calculateYearlyPricing(float $discountPercentage = null): array
     {
         $monthlyTotal = $this->getMonthlyPrice() * 12;
-        
+
         if ($discountPercentage === null) {
             $discountPercentage = $this->getDiscountPercentage();
         }

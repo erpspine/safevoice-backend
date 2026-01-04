@@ -17,9 +17,12 @@ class IncidentCategory extends BaseModel
      */
     protected $fillable = [
         'company_id',
+        'parent_id',
         'name',
+        'category_key',
         'status',
         'description',
+        'sort_order',
     ];
 
     /**
@@ -29,6 +32,7 @@ class IncidentCategory extends BaseModel
      */
     protected $casts = [
         'status' => 'boolean',
+        'sort_order' => 'integer',
     ];
 
     /**
@@ -37,6 +41,22 @@ class IncidentCategory extends BaseModel
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /**
+     * Get the parent category.
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(IncidentCategory::class, 'parent_id');
+    }
+
+    /**
+     * Get the subcategories (children).
+     */
+    public function subcategories(): HasMany
+    {
+        return $this->hasMany(IncidentCategory::class, 'parent_id')->orderBy('sort_order')->orderBy('name');
     }
 
     /**
@@ -86,5 +106,37 @@ class IncidentCategory extends BaseModel
     public function scopeForCompany($query, $companyId)
     {
         return $query->where('company_id', $companyId);
+    }
+
+    /**
+     * Scope to get only parent categories (no parent_id).
+     */
+    public function scopeParentsOnly($query)
+    {
+        return $query->whereNull('parent_id');
+    }
+
+    /**
+     * Scope to get only subcategories (has parent_id).
+     */
+    public function scopeSubcategoriesOnly($query)
+    {
+        return $query->whereNotNull('parent_id');
+    }
+
+    /**
+     * Check if this is a parent category.
+     */
+    public function isParent(): bool
+    {
+        return is_null($this->parent_id);
+    }
+
+    /**
+     * Check if this is a subcategory.
+     */
+    public function isSubcategory(): bool
+    {
+        return !is_null($this->parent_id);
     }
 }

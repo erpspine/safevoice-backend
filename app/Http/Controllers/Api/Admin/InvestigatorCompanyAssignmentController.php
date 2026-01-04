@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\Investigator;
+use App\Mail\InvestigatorAssignedToCompany;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class InvestigatorCompanyAssignmentController extends Controller
@@ -35,7 +37,7 @@ class InvestigatorCompanyAssignmentController extends Controller
                 ], 403);
             }
 
-            $query = Investigator::with(['companies' => function ($query) {
+            $query = Investigator::with(['user', 'companies' => function ($query) {
                 $query->select(['companies.*'])
                     ->withPivot(['created_at'])
                     ->orderBy('companies.name', 'asc');
@@ -76,6 +78,77 @@ class InvestigatorCompanyAssignmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve investigator company assignments',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all investigators list (simple list for dropdowns).
+     */
+    public function investigators(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            // Ensure the request is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication required. Please provide a valid authorization token.'
+                ], 401);
+            }
+
+            // Ensure user has admin or super_admin role
+            if (!in_array($user->role, ['admin', 'super_admin'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. Only admins can access investigators.'
+                ], 403);
+            }
+
+            $query = Investigator::with('user')->withCount('companies');
+
+            // Filter by status (default to active only)
+            if ($request->has('status')) {
+                $query->where('status', $request->boolean('status'));
+            } else {
+                $query->where('status', true);
+            }
+
+            // Search by name or email
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->whereHas('user', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'ilike', "%{$search}%")
+                            ->orWhere('email', 'ilike', "%{$search}%");
+                    })
+                        ->orWhere('external_name', 'ilike', "%{$search}%")
+                        ->orWhere('external_email', 'ilike', "%{$search}%");
+                });
+            }
+
+            $investigators = $query->get()->map(function ($investigator) {
+                return [
+                    'id' => $investigator->id,
+                    'name' => $investigator->display_name,
+                    'email' => $investigator->contact_email,
+                    'is_external' => $investigator->is_external,
+                    'status' => $investigator->status,
+                    'availability_status' => $investigator->availability_status,
+                    'companies_count' => $investigator->companies_count,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $investigators,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve investigators',
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -275,6 +348,20 @@ class InvestigatorCompanyAssignmentController extends Controller
 
             // Add any new assignments
             $investigatorModel->companies()->syncWithoutDetaching($request->company_ids);
+
+            // Send email notification to the investigator about new assignments
+            if ($investigatorModel->user && $investigatorModel->user->email) {
+                try {
+                    Mail::to($investigatorModel->user->email)
+                        ->send(new InvestigatorAssignedToCompany($investigatorModel, $companies->all()));
+                } catch (\Exception $mailException) {
+                    // Log the email error but don't fail the assignment
+                    \Log::warning('Failed to send investigator assignment email', [
+                        'investigator_id' => $investigatorModel->id,
+                        'error' => $mailException->getMessage()
+                    ]);
+                }
+            }
 
             return response()->json([
                 'success' => true,

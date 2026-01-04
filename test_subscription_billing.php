@@ -86,7 +86,7 @@ foreach ($plans as $plan) {
     $yearlyPrice = $plan->getYearlyPrice();
     $savings = $monthlyTotal - $yearlyPrice;
     $savePercent = $monthlyTotal > 0 ? round(($savings / $monthlyTotal) * 100, 2) : 0;
-    
+
     printf(
         "%-20s | \$%-13.2f | \$%-6.2f | \$%-5.2f | %d%%\n",
         $plan->name,

@@ -25,7 +25,25 @@ class Company extends BaseModel
         'address',
         'website',
         'description',
+        'sector',
         'tax_id',
+    ];
+
+    /**
+     * Available sectors for companies.
+     */
+    public const SECTORS = [
+        'education' => 'Education Sector',
+        'corporate_workplace' => 'Corporate & Workplace Sector',
+        'financial_insurance' => 'Financial & Insurance Sector',
+        'healthcare' => 'Healthcare Sector',
+        'manufacturing_industrial' => 'Manufacturing & Industrial Sector',
+        'construction_engineering' => 'Construction & Engineering Sector',
+        'security_uniformed_services' => 'Security Forces & Uniformed Services Sector',
+        'hospitality_travel_tourism' => 'Hospitality, Travel & Tourism Sector',
+        'ngo_cso_donor_funded' => 'NGOs, CSOs & Donor-Funded Projects Sector',
+        'religious_institutions' => 'Religious Institutions Sector',
+        'transport_logistics' => 'Transport & Logistics Sector',
     ];
 
     /**

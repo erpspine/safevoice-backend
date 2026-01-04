@@ -21,6 +21,7 @@ class Subscription extends Model
         'renewal_token',
         'cancel_at_period_end',
         'status',
+        'billing_period',
     ];
 
     protected $casts = [
@@ -29,6 +30,7 @@ class Subscription extends Model
         'grace_until' => 'date',
         'auto_renew' => 'boolean',
         'cancel_at_period_end' => 'boolean',
+        'billing_period' => 'string',
     ];
 
     /**
@@ -105,7 +107,7 @@ class Subscription extends Model
     {
         return $this->status === 'in_grace' &&
             $this->grace_until &&
-            now()->between($this->ends_on->addDay(), $this->grace_until);
+            now()->between(Carbon::parse($this->ends_on)->addDay(), $this->grace_until);
     }
 
     /**

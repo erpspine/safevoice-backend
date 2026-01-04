@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\Admin\InvestigatorAssignmentController;
 use App\Http\Controllers\Api\Company\CompanyFeedbackCategoryController;
 use App\Http\Controllers\Api\Company\CompanyIncidentCategoryController;
 use App\Http\Controllers\Api\Admin\InvestigatorCompanyAssignmentController;
+use App\Http\Controllers\Api\Admin\CompanySettingsController;
 use App\Http\Controllers\Api\CaseResolutionController;
 use App\Http\Controllers\Api\DepartmentalCaseDistributionController;
 use App\Http\Controllers\Api\CategoryCaseDistributionController;
@@ -46,6 +47,9 @@ use App\Http\Controllers\Api\InvestigatorAllocationController;
 // Admin Controllers
 use App\Http\Controllers\Api\Admin\AdminDashboardController;
 use App\Http\Controllers\Api\Admin\IncidentReportController;
+use App\Http\Controllers\Api\Admin\SectorIncidentTemplateController;
+use App\Http\Controllers\Api\Admin\CaseTrackingController;
+use App\Http\Controllers\Api\Admin\EscalationRuleController;
 
 // Investigator Controllers
 use App\Http\Controllers\Api\Investigator\InvestigatorAuthController;
@@ -99,6 +103,12 @@ Route::prefix('public')->group(function () {
     // Get companies for frontend dropdowns, registration forms, etc.
     Route::get('companies', [CompanyController::class, 'publicIndex'])->name('public.companies.index');
 
+    // Get available sectors for companies
+    Route::get('sectors', [CompanyController::class, 'sectors'])->name('public.sectors');
+
+    // Get admin company settings (for invoices, etc.)
+    Route::get('company-info', [CompanySettingsController::class, 'publicSettings'])->name('public.company-info');
+
     // Get active subscription plans for public use
     Route::get('subscription-plans', [SubscriptionPlanController::class, 'active'])->name('public.subscription-plans.active');
 
@@ -114,8 +124,14 @@ Route::prefix('public')->group(function () {
     // Get incident categories (all active)
     Route::get('incident-categories', [IncidentCategoryController::class, 'publicIndex'])->name('public.incident-categories.index');
 
-    // Get incident categories for a particular company
+    // Get incident categories for a particular company (hierarchical - parent with nested subcategories)
     Route::get('companies/{companyId}/incident-categories', [IncidentCategoryController::class, 'publicByCompany'])->name('public.companies.incident-categories');
+
+    // Get parent (root) categories only for a company (for first dropdown)
+    Route::get('companies/{companyId}/incident-categories/parents', [IncidentCategoryController::class, 'publicParentCategories'])->name('public.companies.incident-categories.parents');
+
+    // Get subcategories for a specific parent category (for second dropdown)
+    Route::get('companies/{companyId}/incident-categories/{parentId}/subcategories', [IncidentCategoryController::class, 'publicSubcategories'])->name('public.companies.incident-categories.subcategories');
 
     // Debug route to test payload
     Route::post('cases/test-payload', function (Request $request) {
@@ -204,6 +220,12 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     // Reports
     Route::get('reports/incident', [IncidentReportController::class, 'index'])->name('admin.reports.incident');
 
+    // Company Settings (Admin company info for invoices)
+    Route::get('settings', [CompanySettingsController::class, 'show'])->name('admin.settings.show');
+    Route::put('settings', [CompanySettingsController::class, 'update'])->name('admin.settings.update');
+    Route::post('settings/logo', [CompanySettingsController::class, 'uploadLogo'])->name('admin.settings.upload-logo');
+    Route::delete('settings/logo', [CompanySettingsController::class, 'deleteLogo'])->name('admin.settings.delete-logo');
+
     // Company Management
     Route::apiResource('companies', CompanyController::class);
     Route::get('companies/statistics/dashboard', [CompanyController::class, 'statistics'])->name('admin.companies.statistics');
@@ -222,6 +244,14 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::get('incident-categories/statistics/dashboard', [IncidentCategoryController::class, 'statistics'])->name('admin.incident-categories.statistics');
     Route::get('companies/{companyId}/incident-categories', [IncidentCategoryController::class, 'byCompany'])->name('admin.companies.incident-categories');
 
+    // Sector Incident Template Management (Category Templates)
+    Route::apiResource('category-templates', SectorIncidentTemplateController::class);
+    Route::get('category-templates/statistics/dashboard', [SectorIncidentTemplateController::class, 'statistics'])->name('admin.category-templates.statistics');
+    Route::get('category-templates/sector/{sector}', [SectorIncidentTemplateController::class, 'bySector'])->name('admin.category-templates.by-sector');
+    Route::post('category-templates/sector/{sector}/sync', [SectorIncidentTemplateController::class, 'syncToCompanies'])->name('admin.category-templates.sync-to-companies');
+    Route::post('category-templates/bulk', [SectorIncidentTemplateController::class, 'bulkStore'])->name('admin.category-templates.bulk-store');
+    Route::delete('category-templates/sector/{sector}', [SectorIncidentTemplateController::class, 'destroyBySector'])->name('admin.category-templates.destroy-by-sector');
+
     // Feedback Category Management
     Route::apiResource('feedback-categories', FeedbackCategoryController::class);
     Route::get('feedback-categories/statistics/dashboard', [FeedbackCategoryController::class, 'statistics'])->name('admin.feedback-categories.statistics');
@@ -233,6 +263,8 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::get('users/investigators/list', [UserController::class, 'investigators'])->name('admin.users.investigators');
     Route::get('users/{userId}/available-companies', [UserController::class, 'availableCompanies'])->name('admin.users.available-companies');
     Route::post('users/{id}/resend-invitation', [UserController::class, 'resendInvitation'])->name('admin.users.resend-invitation');
+    Route::post('users/{id}/deactivate', [UserController::class, 'deactivate'])->name('admin.users.deactivate');
+    Route::post('users/{id}/activate', [UserController::class, 'activate'])->name('admin.users.activate');
     Route::get('users/by-company-branch', [UserController::class, 'getByCompanyBranch'])->name('admin.users.by-company-branch');
     Route::get('users/fast-by-company-branch', [UserController::class, 'fastByCompanyBranch'])->name('admin.users.fast-by-company-branch');
 
@@ -249,6 +281,12 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::put('subscriptions/{subscription}/branches', [SubscriptionController::class, 'updateBranches'])->name('admin.subscriptions.update-branches');
     Route::post('subscriptions/{subscription}/cancel', [SubscriptionController::class, 'cancel'])->name('admin.subscriptions.cancel');
     Route::post('subscriptions/{subscription}/extend', [SubscriptionController::class, 'extend'])->name('admin.subscriptions.extend');
+    Route::get('subscriptions/{subscription}/invoices', [SubscriptionController::class, 'getSubscriptionInvoices'])->name('admin.subscriptions.invoices');
+
+    // Invoice Routes
+    Route::get('invoices/{payment}/download', [SubscriptionController::class, 'downloadInvoice'])->name('invoices.download');
+    Route::get('invoices/{payment}/view', [SubscriptionController::class, 'viewInvoice'])->name('invoices.view');
+    Route::get('invoices/{payment}/data', [SubscriptionController::class, 'getInvoiceData'])->name('invoices.data');
 
     // Investigator Assignment Management (Company to Investigator)
     Route::get('investigator-assignments', [InvestigatorAssignmentController::class, 'index'])->name('admin.investigator-assignments.index');
@@ -261,6 +299,7 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
 
     // Investigator Company Assignment Management (Investigator to Company)
     Route::get('investigator-company-assignments', [InvestigatorCompanyAssignmentController::class, 'index'])->name('admin.investigator-company-assignments.index');
+    Route::get('investigator-company-assignments/investigators', [InvestigatorCompanyAssignmentController::class, 'investigators'])->name('admin.investigator-company-assignments.investigators');
     Route::get('investigator-company-assignments/stats', [InvestigatorCompanyAssignmentController::class, 'stats'])->name('admin.investigator-company-assignments.stats');
     Route::get('investigator-company-assignments/investigators/{investigator}/companies', [InvestigatorCompanyAssignmentController::class, 'investigatorCompanies'])->name('admin.investigator-company-assignments.investigator-companies');
     Route::get('investigator-company-assignments/investigators/{investigator}/available', [InvestigatorCompanyAssignmentController::class, 'availableCompanies'])->name('admin.investigator-company-assignments.available');
@@ -283,7 +322,38 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
         Route::post('threads/{threadId}/messages', [ThreadManagementController::class, 'addMessage'])->name('admin.threads.add-message');
         Route::post('threads/{threadId}/participants', [ThreadManagementController::class, 'addParticipants'])->name('admin.threads.add-participants');
         Route::post('threads/{threadId}/mark-read', [ThreadManagementController::class, 'markAsRead'])->name('admin.threads.mark-read');
+
+        // Case Tracking (Timeline & Durations)
+        Route::get('timeline', [CaseTrackingController::class, 'getTimeline'])->name('admin.cases.timeline');
+        Route::get('duration-summary', [CaseTrackingController::class, 'getDurationSummary'])->name('admin.cases.duration-summary');
+        Route::get('escalations', [CaseTrackingController::class, 'getCaseEscalations'])->name('admin.cases.escalations');
     });
+
+    // Case Tracking Dashboard & Analytics
+    Route::prefix('case-tracking')->group(function () {
+        Route::get('dashboard', [CaseTrackingController::class, 'getDashboardStats'])->name('admin.case-tracking.dashboard');
+        Route::get('overdue', [CaseTrackingController::class, 'getOverdueCases'])->name('admin.case-tracking.overdue');
+    });
+
+    // Escalation Management
+    Route::prefix('escalations')->group(function () {
+        Route::post('{escalationId}/resolve', [CaseTrackingController::class, 'resolveEscalation'])->name('admin.escalations.resolve');
+    });
+
+    // Escalation Rules Management
+    Route::prefix('escalation-rules')->group(function () {
+        Route::get('stages', [EscalationRuleController::class, 'getStages'])->name('admin.escalation-rules.stages');
+        Route::get('levels', [EscalationRuleController::class, 'getEscalationLevels'])->name('admin.escalation-rules.levels');
+        Route::get('business-hours', [EscalationRuleController::class, 'getDefaultBusinessHours'])->name('admin.escalation-rules.business-hours');
+        Route::post('{id}/toggle', [EscalationRuleController::class, 'toggleActive'])->name('admin.escalation-rules.toggle');
+    });
+    Route::apiResource('escalation-rules', EscalationRuleController::class)->names([
+        'index' => 'admin.escalation-rules.index',
+        'store' => 'admin.escalation-rules.store',
+        'show' => 'admin.escalation-rules.show',
+        'update' => 'admin.escalation-rules.update',
+        'destroy' => 'admin.escalation-rules.destroy',
+    ]);
 });
 
 // Company Management Routes (Protected - for company admins)
@@ -340,6 +410,9 @@ Route::middleware(['auth:sanctum'])->prefix('company')->group(function () {
     Route::get('cases/{id}', [CompanyCaseController::class, 'show'])->name('company.cases.show');
     Route::put('cases/{id}', [CompanyCaseController::class, 'update'])->name('company.cases.update');
     Route::get('cases/{id}/timeline', [CompanyCaseController::class, 'timeline'])->name('company.cases.timeline');
+    Route::get('cases/{id}/duration-summary', [CompanyCaseController::class, 'getDurationSummary'])->name('company.cases.duration-summary');
+    Route::get('cases/{id}/escalations', [CompanyCaseController::class, 'getCaseEscalations'])->name('company.cases.escalations');
+    Route::get('cases/{id}/tracking', [CompanyCaseController::class, 'getFullTracking'])->name('company.cases.tracking');
 
     // Case Department Assignment
     Route::post('cases/{id}/departments', [CompanyCaseController::class, 'assignDepartments'])->name('company.cases.assign-departments');
@@ -397,6 +470,10 @@ Route::middleware(['auth:sanctum'])->prefix('branch')->group(function () {
     Route::get('cases/{id}', [BranchCaseController::class, 'show'])->name('branch.cases.show');
     Route::get('cases/{id}/thread-activity', [BranchCaseController::class, 'getCaseThreadActivity'])->name('branch.cases.thread-activity');
     Route::put('cases/{id}', [BranchCaseController::class, 'update'])->name('branch.cases.update');
+    Route::get('cases/{id}/timeline', [BranchCaseController::class, 'timeline'])->name('branch.cases.timeline');
+    Route::get('cases/{id}/duration-summary', [BranchCaseController::class, 'getDurationSummary'])->name('branch.cases.duration-summary');
+    Route::get('cases/{id}/escalations', [BranchCaseController::class, 'getCaseEscalations'])->name('branch.cases.escalations');
+    Route::get('cases/{id}/tracking', [BranchCaseController::class, 'getFullTracking'])->name('branch.cases.tracking');
 
     // Case Department Assignment (Branch)
     Route::post('cases/{id}/departments', [BranchCaseController::class, 'assignDepartments'])->name('branch.cases.assign-departments');

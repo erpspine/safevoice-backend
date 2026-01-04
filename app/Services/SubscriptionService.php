@@ -10,19 +10,25 @@ class SubscriptionService
 {
     /**
      * Start or renew a subscription for a company.
+     * 
+     * Logic:
+     * - If branches have unexpired billing, add new duration to remaining days
+     * - If branches have expired billing, start from payment date (today)
      */
     public function startOrRenew(
         Company $company,
         SubscriptionPlan $plan,
         int $durationMonths,
-        array $paymentData, // method, reference, amount, etc.
+        array $paymentData, // method, reference, amount, billing_period, etc.
         array $selectedBranchIds = [] // Allow custom branch selection
     ): Subscription {
         return DB::transaction(function () use ($company, $plan, $durationMonths, $paymentData, $selectedBranchIds) {
 
             $today = Carbon::today();
+            $billingPeriod = $paymentData['billing_period'] ?? 'monthly';
             $active = $company->activeSubscription(); // helper relation/scope
 
+            // Determine start date based on active subscription
             $startsOn = $active
                 ? Carbon::parse($active->ends_on)->addDay()  // stack periods
                 : $today;
@@ -33,6 +39,7 @@ class SubscriptionService
             $subscription = Subscription::create([
                 'company_id' => $company->id,
                 'plan_id'    => $plan->id,
+                'billing_period' => $billingPeriod,
                 'starts_on'  => $startsOn,
                 'ends_on'    => $endsOn,
                 'grace_until' => $graceUntil,
@@ -40,6 +47,23 @@ class SubscriptionService
                 'auto_renew' => $paymentData['auto_renew'] ?? false,
                 'renewal_method' => $paymentData['payment_method'] ?? null,
                 'renewal_token'  => $paymentData['renewal_token'] ?? null,
+            ]);
+
+            // Update company's plan information
+            $planName = strtolower($plan->name);
+            $planType = 'free'; // default
+
+            if (str_contains($planName, 'enterprise')) {
+                $planType = 'enterprise';
+            } elseif (str_contains($planName, 'premium')) {
+                $planType = 'premium';
+            } elseif (str_contains($planName, 'basic')) {
+                $planType = 'basic';
+            }
+
+            $company->update([
+                'plan' => $planType,
+                'plan_id' => $plan->id,
             ]);
 
             // Create payment record
@@ -69,19 +93,26 @@ class SubscriptionService
 
     /**
      * Activate specific branches selected by the user.
+     * 
+     * Logic for each branch:
+     * - If branch billing hasn't expired (activated_until > today): add new duration to remaining days
+     * - If branch billing has expired (activated_until <= today or null): start from today
      */
     public function activateSelectedBranches(
         Company $company,
         SubscriptionPlan $plan,
-        Carbon $until,
+        Carbon $subscriptionEndsOn,
         Subscription $subscription,
         array $branchIds
     ): void {
+        $today = Carbon::today();
+
         // Validate that selected branches belong to the company
-        $validBranchIds = Branch::where('company_id', $company->id)
+        $branches = Branch::where('company_id', $company->id)
             ->whereIn('id', $branchIds)
-            ->pluck('id')
-            ->toArray();
+            ->get();
+
+        $validBranchIds = $branches->pluck('id')->toArray();
 
         // Check if selection exceeds plan limits
         $count = count($validBranchIds);
@@ -91,20 +122,35 @@ class SubscriptionService
             );
         }
 
-        // Activate selected branches
-        Branch::whereIn('id', $validBranchIds)->update([
-            'is_active' => true,
-            'activated_until' => $until,
-        ]);
-
-        // Track which branches are activated by THIS subscription
+        // Calculate activation end date for each branch individually
         $attach = [];
-        foreach ($validBranchIds as $branchId) {
-            $attach[$branchId] = [
-                'activated_from'  => now()->toDateString(),
-                'activated_until' => $until->toDateString(),
+        foreach ($branches as $branch) {
+            // Determine the start date for this branch's new billing period
+            $branchStartsOn = $today;
+
+            // If the branch has unexpired billing, stack the new period
+            if ($branch->activated_until && Carbon::parse($branch->activated_until)->gt($today)) {
+                // Add remaining days to the new subscription end date
+                $remainingDays = Carbon::parse($branch->activated_until)->diffInDays($today);
+                $newActivatedUntil = (clone $subscriptionEndsOn)->addDays($remainingDays);
+            } else {
+                // Branch billing expired or never activated, start fresh from subscription end
+                $newActivatedUntil = $subscriptionEndsOn;
+            }
+
+            // Update branch activation
+            $branch->update([
+                'is_active' => true,
+                'activated_until' => $newActivatedUntil,
+            ]);
+
+            // Track which branches are activated by THIS subscription
+            $attach[$branch->id] = [
+                'activated_from'  => $branchStartsOn->toDateString(),
+                'activated_until' => $newActivatedUntil->toDateString(),
             ];
         }
+
         $subscription->branches()->syncWithoutDetaching($attach);
 
         // Deactivate other branches not selected
@@ -115,32 +161,52 @@ class SubscriptionService
 
     /**
      * Automatically activate branches based on plan limits (original logic).
+     * Now includes stacking logic: if a branch is not expired, add new duration to existing end date.
      */
     public function activateBranchesForPlan(
         Company $company,
         SubscriptionPlan $plan,
         Carbon $until,
-        ?Subscription $subscription = null
+        ?Subscription $subscription = null,
+        int $durationMonths = 1
     ): void {
         $q = Branch::where('company_id', $company->id)->orderBy('id');
         $cap = $plan->max_branches; // null = unlimited
-        $ids = $cap ? $q->limit($cap)->pluck('id') : $q->pluck('id');
+        $branches = $cap ? $q->limit($cap)->get() : $q->get();
+        $ids = $branches->pluck('id');
 
-        // Activate selected
-        Branch::whereIn('id', $ids)->update([
-            'is_active' => true,
-            'activated_until' => $until,
-        ]);
+        $today = Carbon::today();
+        $attach = [];
+
+        // Process each branch with stacking logic
+        foreach ($branches as $branch) {
+            $currentActivatedUntil = $branch->activated_until ? Carbon::parse($branch->activated_until) : null;
+
+            // If branch has active billing that hasn't expired, add new period to existing end date
+            if ($currentActivatedUntil && $currentActivatedUntil->greaterThan($today)) {
+                $branchStartDate = $currentActivatedUntil->copy()->addDay(); // Start from day after current end
+                $branchEndDate = $branchStartDate->copy()->addMonthsNoOverflow($durationMonths)->subDay();
+            } else {
+                // Branch billing expired or never activated - start from today
+                $branchStartDate = $today->copy();
+                $branchEndDate = $branchStartDate->copy()->addMonthsNoOverflow($durationMonths)->subDay();
+            }
+
+            // Update this specific branch
+            Branch::where('id', $branch->id)->update([
+                'is_active' => true,
+                'activated_until' => $branchEndDate,
+            ]);
+
+            // Prepare pivot data for tracking
+            $attach[$branch->id] = [
+                'activated_from'  => $branchStartDate->toDateString(),
+                'activated_until' => $branchEndDate->toDateString(),
+            ];
+        }
 
         // Track which branches are activated by THIS subscription
-        if ($subscription) {
-            $attach = [];
-            foreach ($ids as $bid) {
-                $attach[$bid] = [
-                    'activated_from'  => now()->toDateString(),
-                    'activated_until' => $until->toDateString(),
-                ];
-            }
+        if ($subscription && !empty($attach)) {
             $subscription->branches()->syncWithoutDetaching($attach);
         }
 

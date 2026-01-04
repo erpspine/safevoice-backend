@@ -19,7 +19,15 @@ class IncidentCategoryController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = IncidentCategory::with(['company:id,name']);
+            $query = IncidentCategory::with([
+                'company:id,name',
+                'parent:id,name',
+                'subcategories' => function ($query) {
+                    $query->select(['id', 'parent_id', 'company_id', 'name', 'description', 'status', 'sort_order'])
+                        ->orderBy('sort_order')
+                        ->orderBy('name');
+                }
+            ]);
 
             // Apply sorting
             $sortBy = $request->get('sort_by', 'created_at');
@@ -229,14 +237,20 @@ class IncidentCategoryController extends Controller
         try {
             $company = Company::findOrFail($companyId);
 
+            // Get root categories (no parent) with their subcategories
             $categories = IncidentCategory::where('company_id', $companyId)
+                ->whereNull('parent_id')
+                ->with(['subcategories' => function ($query) {
+                    $query->orderBy('sort_order')->orderBy('name');
+                }])
+                ->orderBy('sort_order')
                 ->orderBy('name')
                 ->get();
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'company' => $company->only(['id', 'name']),
+                    'company' => $company->only(['id', 'name', 'sector']),
                     'incident_categories' => $categories
                 ]
             ]);
@@ -299,15 +313,23 @@ class IncidentCategoryController extends Controller
                 ->where('status', true)
                 ->firstOrFail();
 
-            // Get active incident categories for the company
+            // Get active root incident categories for the company with their active subcategories
             $categories = IncidentCategory::where('company_id', $companyId)
+                ->whereNull('parent_id') // Only root categories
                 ->where('status', true) // Only active categories
+                ->with(['subcategories' => function ($query) {
+                    $query->where('status', true)
+                        ->select(['id', 'parent_id', 'name', 'description'])
+                        ->orderBy('sort_order')
+                        ->orderBy('name');
+                }])
                 ->select([
                     'id',
                     'name',
                     'description',
                 ])
-                ->orderBy('name', 'asc')
+                ->orderBy('sort_order')
+                ->orderBy('name')
                 ->get();
 
             return response()->json([
@@ -360,6 +382,106 @@ class IncidentCategoryController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve incident categories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Public API to get parent (root) incident categories for a specific company.
+     * Used for the first dropdown in user portal case submission.
+     */
+    public function publicParentCategories(string $companyId): JsonResponse
+    {
+        try {
+            // Verify company exists and is active
+            $company = Company::where('id', $companyId)
+                ->where('status', true)
+                ->firstOrFail();
+
+            // Get only parent categories (no parent_id)
+            $categories = IncidentCategory::where('company_id', $companyId)
+                ->whereNull('parent_id')
+                ->where('status', true)
+                ->select(['id', 'name', 'description'])
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Parent categories retrieved successfully.',
+                'data' => [
+                    'company_id' => $companyId,
+                    'company_name' => $company->name,
+                    'categories' => $categories,
+                    'total' => $categories->count()
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company not found or inactive.',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve parent categories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Public API to get subcategories for a specific parent category.
+     * Used for the second dropdown in user portal case submission.
+     */
+    public function publicSubcategories(string $companyId, string $parentId): JsonResponse
+    {
+        try {
+            // Verify company exists and is active
+            $company = Company::where('id', $companyId)
+                ->where('status', true)
+                ->firstOrFail();
+
+            // Verify parent category exists and belongs to the company
+            $parentCategory = IncidentCategory::where('id', $parentId)
+                ->where('company_id', $companyId)
+                ->where('status', true)
+                ->whereNull('parent_id')
+                ->firstOrFail();
+
+            // Get subcategories for this parent
+            $subcategories = IncidentCategory::where('company_id', $companyId)
+                ->where('parent_id', $parentId)
+                ->where('status', true)
+                ->select(['id', 'name', 'description'])
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Subcategories retrieved successfully.',
+                'data' => [
+                    'company_id' => $companyId,
+                    'parent_category' => [
+                        'id' => $parentCategory->id,
+                        'name' => $parentCategory->name,
+                    ],
+                    'subcategories' => $subcategories,
+                    'total' => $subcategories->count()
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company, or parent category not found.',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve subcategories.',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }

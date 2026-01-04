@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CaseModel;
 use App\Models\CaseFile;
 use App\Models\CaseInvolvedParty;
+use App\Models\CaseCategory;
 use App\Models\CaseAdditionalParty;
 use App\Models\Company;
 use App\Models\Branch;
@@ -14,6 +15,7 @@ use App\Models\IncidentCategory;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\AutoThreadService;
+use App\Services\CaseTrackingService;
 use Illuminate\Support\Facades\Hash;
 use App\Mail\NewCaseNotification;
 use Illuminate\Http\Request;
@@ -79,6 +81,11 @@ class CaseSubmissionController extends Controller
             'contact_info.email' => 'nullable|email|max:255',
             'contact_info.phone' => 'nullable|string|max:20',
             'contact_info.is_anonymous' => 'nullable|boolean',
+            // Incident Categories (user selection)
+            'categories' => 'nullable|array',
+            'categories.*.category_id' => 'required|string|exists:incident_categories,id',
+            'categories.*.parent_category_id' => 'nullable|string|exists:incident_categories,id',
+            'categories.*.is_primary' => 'nullable|boolean',
             'involved_parties' => 'nullable|array',
             'involved_parties.*.employee_id' => 'required|string|max:50',
             'involved_parties.*.nature_of_involvement' => 'required|string',
@@ -144,6 +151,82 @@ class CaseSubmissionController extends Controller
                 'follow_up_required' => !$isAnonymous,
                 'is_anonymous' => $isAnonymous
             ]);
+
+            // Handle user-selected incident categories
+            $savedCategories = [];
+            $categoriesInput = $request->input('categories', []);
+
+            Log::info('Categories input received', [
+                'case_id' => $case->id,
+                'has_categories' => $request->has('categories'),
+                'categories_count' => is_array($categoriesInput) ? count($categoriesInput) : 0,
+                'categories_data' => $categoriesInput,
+            ]);
+
+            if (!empty($categoriesInput) && is_array($categoriesInput)) {
+                $isPrimarySet = false;
+
+                foreach ($categoriesInput as $index => $categoryData) {
+                    // Verify the category belongs to the selected company
+                    $category = IncidentCategory::where('id', $categoryData['category_id'] ?? null)
+                        ->where('company_id', $request->company_id)
+                        ->where('status', true)
+                        ->first();
+
+                    if (!$category) {
+                        Log::warning('Invalid category skipped', [
+                            'case_id' => $case->id,
+                            'category_data' => $categoryData,
+                            'company_id' => $request->company_id,
+                        ]);
+                        continue; // Skip invalid categories
+                    }
+
+                    // Verify parent category if provided
+                    $parentCategoryId = null;
+                    if (!empty($categoryData['parent_category_id'])) {
+                        $parentCategory = IncidentCategory::where('id', $categoryData['parent_category_id'])
+                            ->where('company_id', $request->company_id)
+                            ->whereNull('parent_id') // Must be a root category
+                            ->where('status', true)
+                            ->first();
+
+                        if ($parentCategory) {
+                            $parentCategoryId = $parentCategory->id;
+                        }
+                    }
+
+                    // Determine if this is the primary category
+                    $isPrimary = false;
+                    if (!$isPrimarySet) {
+                        $isPrimary = ($categoryData['is_primary'] ?? false) || $index === 0;
+                        if ($isPrimary) {
+                            $isPrimarySet = true;
+                        }
+                    }
+
+                    $caseCategory = CaseCategory::create([
+                        'case_id' => $case->id,
+                        'category_id' => $category->id,
+                        'parent_category_id' => $parentCategoryId,
+                        'category_type' => 'incident',
+                        'categorization_source' => 'user',
+                        'is_primary' => $isPrimary,
+                        'confidence_level' => 'high', // User-selected = high confidence
+                        'is_verified' => false, // Not yet verified by company/branch
+                        'assigned_at' => now(),
+                    ]);
+
+                    $savedCategories[] = [
+                        'id' => $caseCategory->id,
+                        'category_id' => $category->id,
+                        'category_name' => $category->name,
+                        'parent_category_id' => $parentCategoryId,
+                        'parent_category_name' => $parentCategoryId ? IncidentCategory::find($parentCategoryId)?->name : null,
+                        'is_primary' => $isPrimary,
+                    ];
+                }
+            }
 
             // Handle involved parties (simplified structure)
             if ($request->has('involved_parties')) {
@@ -225,6 +308,18 @@ class CaseSubmissionController extends Controller
                 // Don't fail the entire case creation for thread creation issues
             }
 
+            // Log case submission event for tracking
+            try {
+                $trackingService = app(CaseTrackingService::class);
+                $trackingService->logCaseSubmitted($case);
+            } catch (\Exception $e) {
+                Log::error('Failed to log case submission event', [
+                    'case_id' => $case->id,
+                    'error' => $e->getMessage()
+                ]);
+                // Don't fail case creation for tracking issues
+            }
+
             DB::commit();
 
             // Send notifications after successful case creation (outside transaction)
@@ -249,6 +344,8 @@ class CaseSubmissionController extends Controller
                     'access_id' => $accessId,
                     'status' => $case->status,
                     'submitted_at' => $case->created_at,
+                    'categories_saved' => count($savedCategories),
+                    'categories' => $savedCategories,
                     'files_uploaded' => count($uploadedFiles),
                     'tracking_info' => [
                         'message' => 'Save your access credentials to track case progress',
@@ -346,62 +443,140 @@ class CaseSubmissionController extends Controller
     /**
      * Send notifications to appropriate recipients when a case is submitted.
      * Logic:
-     * 1. Get all primary recipients for the branch
+     * 1. Get all branch_admin users for the branch
      * 2. Exclude involved parties from recipients
-     * 3. If all primary recipients are involved, send to alternative recipients
+     * 3. If all branch_admin are involved, escalate to:
+     *    - company_admin users for the company
+     *    - alternative recipient_type users for the branch
      */
     private function sendCaseNotifications(CaseModel $case, Request $request): void
     {
         try {
             // If no branch is specified, cannot send notifications
             if (!$case->branch_id) {
+                Log::warning('No branch specified for case notification', [
+                    'case_id' => $case->id,
+                ]);
                 return;
             }
 
             // Get IDs of involved parties (employee_id in involved_parties is actually user_id)
             $involvedUserIds = $case->involvedParties()->pluck('employee_id')->toArray();
 
-            // Get all primary recipients for this branch
-            $primaryRecipients = User::where('branch_id', $case->branch_id)
-                ->where('recipient_type', 'primary')
+            // Get all branch_admin users for this branch
+            $branchAdmins = User::where('branch_id', $case->branch_id)
+                ->where('role', User::ROLE_BRANCH_ADMIN)
                 ->where('status', 'active')
                 ->where('is_verified', true)
                 ->get();
 
-            // Filter out involved parties from primary recipients
-            $eligiblePrimaryRecipients = $primaryRecipients->filter(function ($user) use ($involvedUserIds) {
+            // Filter out involved parties from branch admins
+            $eligibleBranchAdmins = $branchAdmins->filter(function ($user) use ($involvedUserIds) {
                 return !in_array($user->id, $involvedUserIds);
             });
 
-            $recipientType = 'primary'; // Track which type of recipient we're using
+            $recipients = collect();
+            $recipientType = 'branch_admin';
+            $escalated = false;
 
-            // If we have eligible primary recipients, send to them
-            if ($eligiblePrimaryRecipients->count() > 0) {
-                $recipients = $eligiblePrimaryRecipients;
+            // If we have eligible branch admins, send to them
+            if ($eligibleBranchAdmins->count() > 0) {
+                $recipients = $eligibleBranchAdmins;
             } else {
-                // All primary recipients are involved, send to alternative recipients
-                $recipients = User::where('branch_id', $case->branch_id)
+                // All branch admins are involved - ESCALATE
+                $escalated = true;
+                $recipientType = 'escalated';
+
+                Log::info('All branch admins involved, escalating notification', [
+                    'case_id' => $case->id,
+                    'branch_id' => $case->branch_id,
+                    'involved_branch_admins' => $branchAdmins->pluck('id')->toArray(),
+                ]);
+
+                // Option 1: Get company_admin users for this company
+                $companyAdmins = User::where('company_id', $case->company_id)
+                    ->where('role', User::ROLE_COMPANY_ADMIN)
+                    ->where('status', 'active')
+                    ->where('is_verified', true)
+                    ->get();
+
+                // Filter out involved parties from company admins
+                $eligibleCompanyAdmins = $companyAdmins->filter(function ($user) use ($involvedUserIds) {
+                    return !in_array($user->id, $involvedUserIds);
+                });
+
+                // Option 2: Get alternative recipient_type users for the branch
+                $alternativeRecipients = User::where('branch_id', $case->branch_id)
                     ->where('recipient_type', 'alternative')
                     ->where('status', 'active')
                     ->where('is_verified', true)
                     ->get();
 
-                // Also exclude involved parties from alternative recipients
-                $recipients = $recipients->filter(function ($user) use ($involvedUserIds) {
+                // Filter out involved parties from alternative recipients
+                $eligibleAlternatives = $alternativeRecipients->filter(function ($user) use ($involvedUserIds) {
                     return !in_array($user->id, $involvedUserIds);
                 });
 
-                $recipientType = 'alternative';
+                // Combine both escalation paths (avoid duplicates)
+                $recipients = $eligibleCompanyAdmins->merge($eligibleAlternatives)->unique('id');
             }
 
-            // If no recipients available, return
+            // If still no recipients available, try primary recipients as last resort
             if ($recipients->isEmpty()) {
-                Log::warning('No recipients available for case notification', [
+                $primaryRecipients = User::where('branch_id', $case->branch_id)
+                    ->where('recipient_type', 'primary')
+                    ->where('status', 'active')
+                    ->where('is_verified', true)
+                    ->get();
+
+                $recipients = $primaryRecipients->filter(function ($user) use ($involvedUserIds) {
+                    return !in_array($user->id, $involvedUserIds);
+                });
+
+                $recipientType = 'primary_fallback';
+            }
+
+            // If absolutely no recipients available, send to system admins (super_admin)
+            if ($recipients->isEmpty()) {
+                Log::warning('No branch/company recipients available, escalating to system admins', [
                     'case_id' => $case->id,
                     'branch_id' => $case->branch_id,
+                    'company_id' => $case->company_id,
+                    'involved_user_ids' => $involvedUserIds,
+                ]);
+
+                // Get all super_admin users
+                $superAdmins = User::where('role', User::ROLE_SUPER_ADMIN)
+                    ->where('status', 'active')
+                    ->where('is_verified', true)
+                    ->get();
+
+                // Filter out involved parties (unlikely but for consistency)
+                $recipients = $superAdmins->filter(function ($user) use ($involvedUserIds) {
+                    return !in_array($user->id, $involvedUserIds);
+                });
+
+                $recipientType = 'super_admin';
+                $escalated = true;
+            }
+
+            // If even super_admins are not available, log critical warning
+            if ($recipients->isEmpty()) {
+                Log::critical('CRITICAL: No recipients available for case notification including super_admins', [
+                    'case_id' => $case->id,
+                    'branch_id' => $case->branch_id,
+                    'company_id' => $case->company_id,
+                    'involved_user_ids' => $involvedUserIds,
                 ]);
                 return;
             }
+
+            Log::info('Sending case notifications', [
+                'case_id' => $case->id,
+                'recipient_count' => $recipients->count(),
+                'recipient_type' => $recipientType,
+                'escalated' => $escalated,
+            ]);
 
             // Create notification and send email for each recipient
             foreach ($recipients as $recipient) {

@@ -7,7 +7,10 @@ use App\Models\User;
 use App\Models\Company;
 use App\Models\Branch;
 use App\Models\Department;
+use App\Models\Investigator;
 use App\Mail\UserInvitation;
+use App\Mail\AccountDeactivated;
+use App\Mail\AccountActivated;
 use App\Services\SmsService;
 use App\Jobs\SendInvitationSms;
 use App\Jobs\SendInvitationEmail;
@@ -203,6 +206,15 @@ class UserController extends Controller
 
             $user = User::create($userData);
 
+            // If user is an investigator, create the investigator record
+            if ($user->role === 'investigator') {
+                Investigator::create([
+                    'user_id' => $user->id,
+                    'status' => true,
+                    'is_external' => false,
+                ]);
+            }
+
             // Commit the transaction first
             DB::commit();
 
@@ -357,6 +369,18 @@ class UserController extends Controller
             // Invalidate all tokens if user is being deactivated
             if ($statusChangingToInactive) {
                 $user->tokens()->delete();
+
+                // Send account deactivation email notification
+                try {
+                    $reason = $request->get('deactivation_reason', null);
+                    Mail::to($user->email)->send(new AccountDeactivated($user, $reason));
+                } catch (\Exception $mailException) {
+                    // Log the email error but don't fail the update
+                    Log::warning('Failed to send account deactivation email', [
+                        'user_id' => $user->id,
+                        'error' => $mailException->getMessage()
+                    ]);
+                }
             }
 
             // Commit the transaction
@@ -426,6 +450,137 @@ class UserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete user',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Deactivate a user account.
+     */
+    public function deactivate(Request $request, string $id): JsonResponse
+    {
+        DB::beginTransaction();
+
+        try {
+            $user = User::findOrFail($id);
+
+            // Prevent deactivation of the last super admin
+            if ($user->role === 'super_admin') {
+                $activeSuperAdminCount = User::where('role', 'super_admin')
+                    ->where('id', '!=', $id)
+                    ->where('status', 'active')
+                    ->count();
+
+                if ($activeSuperAdminCount === 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Cannot deactivate the last active super admin user'
+                    ], 422);
+                }
+            }
+
+            // Check if user is already inactive
+            if ($user->status === 'inactive') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User account is already deactivated'
+                ], 422);
+            }
+
+            // Update status to inactive
+            $user->update(['status' => 'inactive']);
+
+            // Invalidate all tokens
+            $user->tokens()->delete();
+
+            // Send deactivation email
+            try {
+                $reason = $request->get('reason', null);
+                Mail::to($user->email)->send(new AccountDeactivated($user, $reason));
+            } catch (\Exception $mailException) {
+                Log::warning('Failed to send account deactivation email', [
+                    'user_id' => $user->id,
+                    'error' => $mailException->getMessage()
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User account deactivated successfully. All sessions have been invalidated.',
+                'data' => [
+                    'user' => $user->fresh()->load(['company:id,name', 'branch:id,name'])
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to deactivate user',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Activate a user account.
+     */
+    public function activate(string $id): JsonResponse
+    {
+        DB::beginTransaction();
+
+        try {
+            $user = User::findOrFail($id);
+
+            // Check if user is already active
+            if ($user->status === 'active') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User account is already active'
+                ], 422);
+            }
+
+            // Update status to active
+            $user->update(['status' => 'active']);
+
+            // Send activation email notification
+            try {
+                Mail::to($user->email)->send(new AccountActivated($user));
+            } catch (\Exception $mailException) {
+                Log::warning('Failed to send account activation email', [
+                    'user_id' => $user->id,
+                    'error' => $mailException->getMessage()
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User account activated successfully',
+                'data' => [
+                    'user' => $user->fresh()->load(['company:id,name', 'branch:id,name'])
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to activate user',
                 'error' => $e->getMessage()
             ], 500);
         }

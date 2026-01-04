@@ -1,0 +1,31 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('companies', function (Blueprint $table) {
+            // Make plan and plan_id nullable - will be set when subscription is created
+            $table->string('plan')->nullable()->change();
+            $table->ulid('plan_id')->nullable()->change();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('companies', function (Blueprint $table) {
+            $table->string('plan')->nullable(false)->change();
+            $table->ulid('plan_id')->nullable(false)->change();
+        });
+    }
+};

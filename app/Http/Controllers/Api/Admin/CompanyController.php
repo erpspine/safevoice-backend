@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\SubscriptionPlan;
+use App\Services\IncidentCategoryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -52,8 +53,8 @@ class CompanyController extends Controller
             'address' => 'nullable|string',
             'website' => 'nullable|url|max:255',
             'description' => 'nullable|string',
+            'sector' => 'nullable|in:education,corporate_workplace,financial_insurance,healthcare,manufacturing_industrial,construction_engineering,security_uniformed_services,hospitality_travel_tourism,ngo_cso_donor_funded,religious_institutions,transport_logistics',
             'tax_id' => 'nullable|string|max:255|unique:companies,tax_id',
-            'plan' => 'required|exists:subscription_plans,id',
             'status' => 'boolean',
         ]);
 
@@ -66,25 +67,7 @@ class CompanyController extends Controller
         }
 
         try {
-            $data = $request->except(['logo', 'plan']);
-
-            // Get the subscription plan and determine the plan type
-            $subscriptionPlan = SubscriptionPlan::findOrFail($request->plan);
-
-            // Map subscription plan name to plan type enum
-            $planName = strtolower($subscriptionPlan->name);
-            $planType = 'free'; // default
-
-            if (str_contains($planName, 'enterprise')) {
-                $planType = 'enterprise';
-            } elseif (str_contains($planName, 'premium')) {
-                $planType = 'premium';
-            } elseif (str_contains($planName, 'basic')) {
-                $planType = 'basic';
-            }
-
-            $data['plan'] = $planType;
-            $data['plan_id'] = $subscriptionPlan->id;
+            $data = $request->except(['logo']);
 
             // Handle logo upload
             if ($request->hasFile('logo')) {
@@ -96,7 +79,13 @@ class CompanyController extends Controller
 
             $company = Company::create($data);
 
-            // Load the subscription plan relationship
+            // Auto-populate incident categories based on sector
+            if ($company->sector) {
+                $categoryService = new IncidentCategoryService();
+                $categories = $categoryService->createCategoriesFromSector($company);
+            }
+
+            // Load the subscription plan relationship if exists
             $company->load('subscriptionPlan');
 
             return response()->json([
@@ -181,6 +170,7 @@ class CompanyController extends Controller
                 'address' => 'nullable|string',
                 'website' => 'nullable|url|max:255',
                 'description' => 'nullable|string',
+                'sector' => 'nullable|in:education,corporate_workplace,financial_insurance,healthcare,manufacturing_industrial,construction_engineering,security_uniformed_services,hospitality_travel_tourism,ngo_cso_donor_funded,religious_institutions,transport_logistics',
                 'tax_id' => [
                     'nullable',
                     'string',
@@ -234,18 +224,45 @@ class CompanyController extends Controller
                 $data['logo'] = $logoPath;
             }
 
+            // Track sector changes
+            $oldSector = $company->sector;
+            $newSector = $data['sector'] ?? $oldSector;
+            $sectorChanged = $oldSector !== $newSector && isset($data['sector']);
+
             $company->update($data);
+
+            // Auto-sync incident categories if:
+            // 1. Sector changed (from one value to another)
+            // 2. Sector exists but company has no categories (initial sync)
+            // 3. Sector was set from null to a value
+            $syncResult = null;
+            $categoryService = new IncidentCategoryService();
+
+            if ($company->sector) {
+                $existingCategoriesCount = $company->incidentCategories()->count();
+
+                if ($sectorChanged || $existingCategoriesCount === 0) {
+                    $syncResult = $categoryService->syncCategoriesFromSector($company);
+                }
+            }
 
             // Load the subscription plan relationship
             $company->load('subscriptionPlan');
 
-            return response()->json([
+            $response = [
                 'success' => true,
                 'message' => 'Company updated successfully',
                 'data' => [
                     'company' => $company->fresh(['subscriptionPlan'])
                 ]
-            ]);
+            ];
+
+            // Include sync result if categories were synced
+            if ($syncResult) {
+                $response['data']['category_sync'] = $syncResult;
+            }
+
+            return response()->json($response);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -359,6 +376,11 @@ class CompanyController extends Controller
                 $query->where('name', 'ilike', "%{$search}%");
             }
 
+            // Filter by sector if provided
+            if ($request->has('sector') && $request->sector !== '') {
+                $query->where('sector', $request->sector);
+            }
+
             // Get companies with basic fields (avoiding potentially missing fields)
             $companies = $query->select([
                 'id',
@@ -366,6 +388,7 @@ class CompanyController extends Controller
                 'email',
                 'contact',
                 'address',
+                'sector',
                 'logo'
             ])
                 ->orderBy('name', 'asc')
@@ -383,5 +406,16 @@ class CompanyController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get all available sectors for companies.
+     */
+    public function sectors(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => Company::SECTORS
+        ]);
     }
 }

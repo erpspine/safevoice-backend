@@ -26,43 +26,48 @@ Your subscription API now supports **monthly and yearly billing periods** with a
 ## 💻 API Endpoints
 
 ### 1️⃣ Get All Plans (with pricing)
+
 ```bash
 curl -X GET http://localhost:8000/api/subscription-plans/active
 ```
 
 **Response:**
+
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "01k958g5k65cpdyktgbtvae7nn",
-      "name": "Starter",
-      "billing_period": "monthly",
-      "pricing": {
-        "monthly_price": 29.99,
-        "yearly_price": 299.99,
-        "discount_percentage": 10,
-        "discount_amount": 59.88,
-        "amount_saved": 59.88,
-        "currency": "USD"
-      }
-    }
-  ]
+    "success": true,
+    "data": [
+        {
+            "id": "01k958g5k65cpdyktgbtvae7nn",
+            "name": "Starter",
+            "billing_period": "monthly",
+            "pricing": {
+                "monthly_price": 29.99,
+                "yearly_price": 299.99,
+                "discount_percentage": 10,
+                "discount_amount": 59.88,
+                "amount_saved": 59.88,
+                "currency": "USD"
+            }
+        }
+    ]
 }
 ```
 
 ### 2️⃣ Get Specific Plan
+
 ```bash
 curl -X GET http://localhost:8000/api/subscription-plans/{id}
 ```
 
 ### 3️⃣ Calculate Custom Pricing
+
 ```bash
 curl -X GET "http://localhost:8000/api/subscription-plans/{id}/pricing?discount_percentage=25"
 ```
 
 ### 4️⃣ Create Plan (with discount %)
+
 ```bash
 curl -X POST http://localhost:8000/api/subscription-plans \
   -H "Content-Type: application/json" \
@@ -72,9 +77,11 @@ curl -X POST http://localhost:8000/api/subscription-plans \
     "discount_percentage": 12.5
   }'
 ```
-*yearly_price auto-calculated*
+
+_yearly_price auto-calculated_
 
 ### 5️⃣ Create Plan (with yearly price)
+
 ```bash
 curl -X POST http://localhost:8000/api/subscription-plans \
   -H "Content-Type: application/json" \
@@ -84,9 +91,11 @@ curl -X POST http://localhost:8000/api/subscription-plans \
     "yearly_price": 1049.99
   }'
 ```
-*discount % auto-calculated*
+
+_discount % auto-calculated_
 
 ### 6️⃣ Update Plan
+
 ```bash
 curl -X PUT http://localhost:8000/api/subscription-plans/{id} \
   -H "Content-Type: application/json" \
@@ -101,6 +110,7 @@ curl -X PUT http://localhost:8000/api/subscription-plans/{id} \
 ## 🔧 Using in Your Code
 
 ### PHP
+
 ```php
 use App\Models\SubscriptionPlan;
 
@@ -120,16 +130,19 @@ echo $pricing['yearly_price'];        // Price with 20% discount
 ```
 
 ### JavaScript / Frontend
+
 ```javascript
 // Fetch and display plans
-const response = await fetch('/api/subscription-plans/active');
+const response = await fetch("/api/subscription-plans/active");
 const { data: plans } = await response.json();
 
-plans.forEach(plan => {
-  console.log(`${plan.name}`);
-  console.log(`Monthly: $${plan.pricing.monthly_price}`);
-  console.log(`Yearly: $${plan.pricing.yearly_price}`);
-  console.log(`Save: ${plan.pricing.discount_percentage}% ($${plan.pricing.amount_saved})`);
+plans.forEach((plan) => {
+    console.log(`${plan.name}`);
+    console.log(`Monthly: $${plan.pricing.monthly_price}`);
+    console.log(`Yearly: $${plan.pricing.yearly_price}`);
+    console.log(
+        `Save: ${plan.pricing.discount_percentage}% ($${plan.pricing.amount_saved})`
+    );
 });
 ```
 
@@ -138,6 +151,7 @@ plans.forEach(plan => {
 ## 📊 Pricing Calculation Logic
 
 ### Option A: Provide discount percentage
+
 ```
 Input: price = 29.99, discount_percentage = 10%
 
@@ -149,6 +163,7 @@ Calculations:
 ```
 
 ### Option B: Provide yearly price
+
 ```
 Input: price = 29.99, yearly_price = 299.99
 
@@ -164,47 +179,54 @@ Calculations:
 ## ✨ Highlighted Features
 
 ✅ **Smart Auto-Calculation**
-- Provide discount % → yearly_price auto-calculated
-- Provide yearly_price → discount % auto-calculated
+
+-   Provide discount % → yearly_price auto-calculated
+-   Provide yearly_price → discount % auto-calculated
 
 ✅ **Flexible Pricing**
-- Easy to adjust discounts
-- Works with any price point
-- Supports custom calculations via API
+
+-   Easy to adjust discounts
+-   Works with any price point
+-   Supports custom calculations via API
 
 ✅ **Clear Savings Display**
-- `discount_percentage` - Show % to customers
-- `amount_saved` - Show $ savings
-- `discount_amount` - Total discount
+
+-   `discount_percentage` - Show % to customers
+-   `amount_saved` - Show $ savings
+-   `discount_amount` - Total discount
 
 ✅ **Full API Control**
-- Create/Read/Update plans
-- Calculate custom pricing
-- Get active plans with pricing
+
+-   Create/Read/Update plans
+-   Calculate custom pricing
+-   Get active plans with pricing
 
 ---
 
 ## 🧪 Test It
 
 Run the test script to see it in action:
+
 ```bash
 php test_subscription_billing.php
 ```
 
 Output shows:
-- All active plans with pricing
-- Specific plan details
-- Custom discount calculations
-- Savings comparisons
-- Model helper methods
+
+-   All active plans with pricing
+-   Specific plan details
+-   Custom discount calculations
+-   Savings comparisons
+-   Model helper methods
 
 ---
 
 ## 🎯 Common Use Cases
 
 ### Display Pricing Comparison
+
 ```javascript
-const starter = plans.find(p => p.name === 'Starter');
+const starter = plans.find((p) => p.name === "Starter");
 console.log(`
   Monthly: $${starter.pricing.monthly_price}/month
   Yearly: $${starter.pricing.yearly_price}/year
@@ -213,6 +235,7 @@ console.log(`
 ```
 
 ### Create Custom Pricing Tier
+
 ```php
 SubscriptionPlan::create([
     'name' => 'Custom Enterprise',
@@ -223,6 +246,7 @@ SubscriptionPlan::create([
 ```
 
 ### Get Yearly Cost for Planning
+
 ```php
 $monthlyPlans = SubscriptionPlan::where('billing_period', 'monthly')->get();
 $monthlyPlans->map(function($plan) {
@@ -240,9 +264,10 @@ $monthlyPlans->map(function($plan) {
 ## 📚 Documentation
 
 For detailed information, see:
-- **Full API Guide**: `SUBSCRIPTION_BILLING_API.md`
-- **Implementation Details**: `SUBSCRIPTION_BILLING_IMPLEMENTATION.md`
-- **Test Examples**: `test_subscription_billing.php`
+
+-   **Full API Guide**: `SUBSCRIPTION_BILLING_API.md`
+-   **Implementation Details**: `SUBSCRIPTION_BILLING_IMPLEMENTATION.md`
+-   **Test Examples**: `test_subscription_billing.php`
 
 ---
 
@@ -261,13 +286,13 @@ amount_saved            DECIMAL(10,2) NULLABLE       -- Amount customer saves
 
 ## ✅ Status
 
-- ✅ Migration applied
-- ✅ Database schema updated
-- ✅ Model methods implemented
-- ✅ API endpoints ready
-- ✅ Auto-calculation working
-- ✅ Documentation complete
-- ✅ Tests passing
+-   ✅ Migration applied
+-   ✅ Database schema updated
+-   ✅ Model methods implemented
+-   ✅ API endpoints ready
+-   ✅ Auto-calculation working
+-   ✅ Documentation complete
+-   ✅ Tests passing
 
 **Ready to use!** 🎉
 

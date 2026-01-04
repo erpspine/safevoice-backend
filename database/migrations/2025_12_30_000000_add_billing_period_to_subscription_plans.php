@@ -14,13 +14,13 @@ return new class extends Migration
         Schema::table('subscription_plans', function (Blueprint $table) {
             // Add billing period column (monthly, yearly)
             $table->enum('billing_period', ['monthly', 'yearly'])->default('monthly')->after('price');
-            
+
             // Add yearly pricing and discount fields
             $table->decimal('yearly_price', 10, 2)->nullable()->after('billing_period')->comment('Price for yearly billing (optional)');
             $table->decimal('discount_amount', 10, 2)->nullable()->after('yearly_price')->comment('Discount amount for yearly plan');
             $table->decimal('discount_percentage', 5, 2)->nullable()->after('discount_amount')->comment('Discount percentage for yearly plan');
             $table->decimal('amount_saved', 10, 2)->nullable()->after('discount_percentage')->comment('Total amount saved with yearly plan vs monthly');
-            
+
             // Add index for billing period
             $table->index('billing_period');
         });

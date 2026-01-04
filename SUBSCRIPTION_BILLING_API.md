@@ -32,20 +32,24 @@ amount_saved DECIMAL(10, 2) NULLABLE            -- Total savings compared to mon
 ## Current Pricing Structure
 
 ### Starter Plan
-- **Monthly**: $29.99/month
-- **Yearly**: $299.99/year (10% discount = save $59.88)
+
+-   **Monthly**: $29.99/month
+-   **Yearly**: $299.99/year (10% discount = save $59.88)
 
 ### Professional Plan
-- **Monthly**: $79.99/month
-- **Yearly**: $799.90/year (15% discount = save $143.98)
+
+-   **Monthly**: $79.99/month
+-   **Yearly**: $799.90/year (15% discount = save $143.98)
 
 ### Business Plan
-- **Monthly**: $149.99/month
-- **Yearly**: $1,679.88/year (20% discount = save $419.88)
+
+-   **Monthly**: $149.99/month
+-   **Yearly**: $1,679.88/year (20% discount = save $419.88)
 
 ### Enterprise Plan
-- **Monthly**: $299.99/month
-- **Yearly**: $3,239.88/year (20% discount = save $959.88)
+
+-   **Monthly**: $299.99/month
+-   **Yearly**: $3,239.88/year (20% discount = save $959.88)
 
 ## API Endpoints
 
@@ -56,47 +60,48 @@ GET /api/subscription-plans/active
 ```
 
 **Response:**
+
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      "name": "Starter",
-      "description": "Perfect for small businesses...",
-      "billing_period": "monthly",
-      "pricing": {
-        "monthly_price": 29.99,
-        "yearly_price": 299.99,
-        "discount_percentage": 10.0,
-        "discount_amount": 59.88,
-        "amount_saved": 59.88,
-        "currency": "USD"
-      },
-      "features": {
-        "max_branches": 1,
-        "grace_days": 7
-      }
-    },
-    {
-      "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
-      "name": "Professional",
-      "description": "Ideal for growing companies...",
-      "billing_period": "monthly",
-      "pricing": {
-        "monthly_price": 79.99,
-        "yearly_price": 799.90,
-        "discount_percentage": 15.0,
-        "discount_amount": 143.98,
-        "amount_saved": 143.98,
-        "currency": "USD"
-      },
-      "features": {
-        "max_branches": 5,
-        "grace_days": 14
-      }
-    }
-  ]
+    "success": true,
+    "data": [
+        {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "name": "Starter",
+            "description": "Perfect for small businesses...",
+            "billing_period": "monthly",
+            "pricing": {
+                "monthly_price": 29.99,
+                "yearly_price": 299.99,
+                "discount_percentage": 10.0,
+                "discount_amount": 59.88,
+                "amount_saved": 59.88,
+                "currency": "USD"
+            },
+            "features": {
+                "max_branches": 1,
+                "grace_days": 7
+            }
+        },
+        {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "name": "Professional",
+            "description": "Ideal for growing companies...",
+            "billing_period": "monthly",
+            "pricing": {
+                "monthly_price": 79.99,
+                "yearly_price": 799.9,
+                "discount_percentage": 15.0,
+                "discount_amount": 143.98,
+                "amount_saved": 143.98,
+                "currency": "USD"
+            },
+            "features": {
+                "max_branches": 5,
+                "grace_days": 14
+            }
+        }
+    ]
 }
 ```
 
@@ -107,25 +112,26 @@ GET /api/subscription-plans/{id}
 ```
 
 **Response:**
+
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-    "name": "Starter",
-    "price": 29.99,
-    "billing_period": "monthly",
-    "yearly_price": 299.99,
-    "discount_percentage": 10.0,
-    "discount_amount": 59.88,
-    "amount_saved": 59.88,
-    "currency": "USD",
-    "grace_days": 7,
-    "description": "Perfect for small businesses...",
-    "is_active": true,
-    "created_at": "2025-11-03T12:00:00Z",
-    "updated_at": "2025-12-30T10:00:00Z"
-  }
+    "success": true,
+    "data": {
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "name": "Starter",
+        "price": 29.99,
+        "billing_period": "monthly",
+        "yearly_price": 299.99,
+        "discount_percentage": 10.0,
+        "discount_amount": 59.88,
+        "amount_saved": 59.88,
+        "currency": "USD",
+        "grace_days": 7,
+        "description": "Perfect for small businesses...",
+        "is_active": true,
+        "created_at": "2025-11-03T12:00:00Z",
+        "updated_at": "2025-12-30T10:00:00Z"
+    }
 }
 ```
 
@@ -136,26 +142,28 @@ GET /api/subscription-plans/{id}/pricing?discount_percentage=25
 ```
 
 **Query Parameters:**
-- `discount_percentage` (optional): Custom discount percentage to calculate
+
+-   `discount_percentage` (optional): Custom discount percentage to calculate
 
 **Response:**
+
 ```json
 {
-  "success": true,
-  "data": {
-    "plan": {
-      "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      "name": "Starter"
-    },
-    "pricing": {
-      "monthly_price": 29.99,
-      "monthly_total_12_months": 359.88,
-      "discount_percentage": 25.0,
-      "discount_amount": 89.97,
-      "yearly_price": 269.91,
-      "amount_saved": 89.97
+    "success": true,
+    "data": {
+        "plan": {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "name": "Starter"
+        },
+        "pricing": {
+            "monthly_price": 29.99,
+            "monthly_total_12_months": 359.88,
+            "discount_percentage": 25.0,
+            "discount_amount": 89.97,
+            "yearly_price": 269.91,
+            "amount_saved": 89.97
+        }
     }
-  }
 }
 ```
 
@@ -179,6 +187,7 @@ Content-Type: application/json
 ### 5. Create Subscription Plan (with Yearly & Discount)
 
 **Option A: Provide discount percentage (yearly_price auto-calculated)**
+
 ```http
 POST /api/subscription-plans
 Content-Type: application/json
@@ -196,11 +205,13 @@ Content-Type: application/json
 ```
 
 Response: `yearly_price`, `discount_amount`, `amount_saved` auto-calculated as:
-- `yearly_price` = (29.99 × 12) - discount = 359.88 - 35.99 = 299.99
-- `discount_amount` = 359.88 × (10 / 100) = 35.99
-- `amount_saved` = 35.99
+
+-   `yearly_price` = (29.99 × 12) - discount = 359.88 - 35.99 = 299.99
+-   `discount_amount` = 359.88 × (10 / 100) = 35.99
+-   `amount_saved` = 35.99
 
 **Option B: Provide yearly price (discount auto-calculated)**
+
 ```http
 POST /api/subscription-plans
 Content-Type: application/json
@@ -218,10 +229,11 @@ Content-Type: application/json
 ```
 
 Response: `discount_percentage`, `discount_amount`, `amount_saved` auto-calculated as:
-- Monthly total (12 months) = 79.99 × 12 = 959.88
-- `discount_amount` = 959.88 - 799.90 = 159.98
-- `discount_percentage` = (159.98 / 959.88) × 100 = 16.67%
-- `amount_saved` = 159.98
+
+-   Monthly total (12 months) = 79.99 × 12 = 959.88
+-   `discount_amount` = 959.88 - 799.90 = 159.98
+-   `discount_percentage` = (159.98 / 959.88) × 100 = 16.67%
+-   `amount_saved` = 159.98
 
 ### 6. Update Subscription Plan
 
@@ -236,8 +248,9 @@ Content-Type: application/json
 ```
 
 The API will automatically recalculate:
-- New yearly price based on new monthly price and discount
-- New discount amount and amount saved
+
+-   New yearly price based on new monthly price and discount
+-   New discount amount and amount saved
 
 ## Model Methods
 
@@ -279,16 +292,18 @@ $plan->calculateYearlyPricing(15.0)  // Returns array with all pricing details
 
 ```javascript
 // Fetch active plans
-const response = await fetch('/api/subscription-plans/active');
+const response = await fetch("/api/subscription-plans/active");
 const { data: plans } = await response.json();
 
 // Display pricing options for each plan
-plans.forEach(plan => {
-  const pricing = plan.pricing;
-  console.log(`${plan.name}:`);
-  console.log(`  Monthly: $${pricing.monthly_price}/month`);
-  console.log(`  Yearly:  $${pricing.yearly_price}/year`);
-  console.log(`  Save:    ${pricing.discount_percentage}% ($${pricing.amount_saved})`);
+plans.forEach((plan) => {
+    const pricing = plan.pricing;
+    console.log(`${plan.name}:`);
+    console.log(`  Monthly: $${pricing.monthly_price}/month`);
+    console.log(`  Yearly:  $${pricing.yearly_price}/year`);
+    console.log(
+        `  Save:    ${pricing.discount_percentage}% ($${pricing.amount_saved})`
+    );
 });
 
 // Output:
@@ -379,30 +394,34 @@ is_active              : nullable|boolean
 When creating or updating a plan:
 
 1. **If `discount_percentage` is provided (and `yearly_price` is NOT):**
-   - `yearly_price` = (monthly_price × 12) - discount_amount
-   - `discount_amount` = (monthly_price × 12) × (discount_percentage / 100)
-   - `amount_saved` = discount_amount
+
+    - `yearly_price` = (monthly_price × 12) - discount_amount
+    - `discount_amount` = (monthly_price × 12) × (discount_percentage / 100)
+    - `amount_saved` = discount_amount
 
 2. **If `yearly_price` is provided (and `discount_percentage` is NOT):**
-   - `discount_amount` = (monthly_price × 12) - yearly_price
-   - `discount_percentage` = (discount_amount / (monthly_price × 12)) × 100
-   - `amount_saved` = discount_amount
+
+    - `discount_amount` = (monthly_price × 12) - yearly_price
+    - `discount_percentage` = (discount_amount / (monthly_price × 12)) × 100
+    - `amount_saved` = discount_amount
 
 3. **If both or neither are provided:**
-   - Manually provided values are used (if both)
-   - Zero values are used (if neither)
+    - Manually provided values are used (if both)
+    - Zero values are used (if neither)
 
 ## Migration
 
 The migration `2025_12_30_000000_add_billing_period_to_subscription_plans.php` adds:
-- `billing_period` column (ENUM: monthly, yearly)
-- `yearly_price` column (DECIMAL nullable)
-- `discount_amount` column (DECIMAL nullable)
-- `discount_percentage` column (DECIMAL nullable)
-- `amount_saved` column (DECIMAL nullable)
-- Index on `billing_period` for faster queries
+
+-   `billing_period` column (ENUM: monthly, yearly)
+-   `yearly_price` column (DECIMAL nullable)
+-   `discount_amount` column (DECIMAL nullable)
+-   `discount_percentage` column (DECIMAL nullable)
+-   `amount_saved` column (DECIMAL nullable)
+-   Index on `billing_period` for faster queries
 
 Run migration:
+
 ```bash
 php artisan migrate
 ```
@@ -410,11 +429,13 @@ php artisan migrate
 ## Seeders
 
 The updated `SubscriptionPlanSeeder` creates:
-- 4 monthly plans (Starter, Professional, Business, Enterprise)
-- 4 yearly variants of each with appropriate discounts
-- 1 legacy inactive plan
+
+-   4 monthly plans (Starter, Professional, Business, Enterprise)
+-   4 yearly variants of each with appropriate discounts
+-   1 legacy inactive plan
 
 Seed the database:
+
 ```bash
 php artisan db:seed --class=SubscriptionPlanSeeder
 ```
@@ -422,31 +443,36 @@ php artisan db:seed --class=SubscriptionPlanSeeder
 ## Error Handling
 
 ### 404 - Plan Not Found
+
 ```json
 {
-  "success": false,
-  "message": "Subscription plan not found"
+    "success": false,
+    "message": "Subscription plan not found"
 }
 ```
 
 ### 422 - Validation Failed
+
 ```json
 {
-  "success": false,
-  "message": "Validation failed",
-  "errors": {
-    "price": ["The price field is required."],
-    "discount_percentage": ["The discount percentage may not be greater than 100."]
-  }
+    "success": false,
+    "message": "Validation failed",
+    "errors": {
+        "price": ["The price field is required."],
+        "discount_percentage": [
+            "The discount percentage may not be greater than 100."
+        ]
+    }
 }
 ```
 
 ### 500 - Server Error
+
 ```json
 {
-  "success": false,
-  "message": "Failed to create subscription plan",
-  "error": "Error details..."
+    "success": false,
+    "message": "Failed to create subscription plan",
+    "error": "Error details..."
 }
 ```
 
@@ -460,11 +486,10 @@ php artisan db:seed --class=SubscriptionPlanSeeder
 
 ## Response Codes
 
-| Code | Meaning |
-|------|---------|
-| 200  | Successful GET/PUT request |
+| Code | Meaning                           |
+| ---- | --------------------------------- |
+| 200  | Successful GET/PUT request        |
 | 201  | Successful POST request (created) |
-| 404  | Plan not found |
-| 422  | Validation failed |
-| 500  | Server error |
-
+| 404  | Plan not found                    |
+| 422  | Validation failed                 |
+| 500  | Server error                      |

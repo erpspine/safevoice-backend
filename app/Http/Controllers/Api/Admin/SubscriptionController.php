@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\{Company, SubscriptionPlan, Subscription, Branch};
+use App\Models\{Company, SubscriptionPlan, Subscription, Branch, Payment};
 use App\Services\SubscriptionService;
+use App\Services\InvoiceService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -13,10 +14,12 @@ use Illuminate\Validation\ValidationException;
 class SubscriptionController extends Controller
 {
     protected SubscriptionService $subscriptionService;
+    protected InvoiceService $invoiceService;
 
-    public function __construct(SubscriptionService $subscriptionService)
+    public function __construct(SubscriptionService $subscriptionService, InvoiceService $invoiceService)
     {
         $this->subscriptionService = $subscriptionService;
+        $this->invoiceService = $invoiceService;
     }
 
     /**
@@ -47,9 +50,65 @@ class SubscriptionController extends Controller
 
             $subscriptions = $query->orderBy('created_at', 'desc')->get();
 
+            // Get monthly revenue statistics for the current year
+            $currentYear = now()->year;
+            $monthlyRevenue = Payment::where('status', 'completed')
+                ->whereYear('created_at', $currentYear)
+                ->selectRaw('EXTRACT(MONTH FROM created_at) as month')
+                ->selectRaw('SUM(amount_paid) as total_revenue')
+                ->selectRaw('COUNT(*) as payment_count')
+                ->groupByRaw('EXTRACT(MONTH FROM created_at)')
+                ->orderByRaw('EXTRACT(MONTH FROM created_at)')
+                ->get()
+                ->keyBy('month');
+
+            // Build monthly stats with all 12 months
+            $monthNames = [
+                1 => 'January',
+                2 => 'February',
+                3 => 'March',
+                4 => 'April',
+                5 => 'May',
+                6 => 'June',
+                7 => 'July',
+                8 => 'August',
+                9 => 'September',
+                10 => 'October',
+                11 => 'November',
+                12 => 'December'
+            ];
+
+            $monthlyStats = [];
+            $totalYearRevenue = 0;
+
+            for ($month = 1; $month <= 12; $month++) {
+                $data = $monthlyRevenue->get($month);
+                $revenue = $data ? (float) $data->total_revenue : 0;
+                $totalYearRevenue += $revenue;
+
+                $monthlyStats[] = [
+                    'month' => $month,
+                    'month_name' => $monthNames[$month],
+                    'short_name' => substr($monthNames[$month], 0, 3),
+                    'total_revenue' => $revenue,
+                    'payment_count' => $data ? (int) $data->payment_count : 0,
+                ];
+            }
+
+            // Calculate summary statistics
+            $statistics = [
+                'year' => $currentYear,
+                'total_year_revenue' => $totalYearRevenue,
+                'current_month_revenue' => $monthlyRevenue->get(now()->month)?->total_revenue ?? 0,
+                'current_month_payments' => $monthlyRevenue->get(now()->month)?->payment_count ?? 0,
+                'average_monthly_revenue' => $totalYearRevenue / 12,
+                'monthly_breakdown' => $monthlyStats,
+            ];
+
             return response()->json([
                 'success' => true,
                 'data' => $subscriptions,
+                'statistics' => $statistics,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -104,7 +163,8 @@ class SubscriptionController extends Controller
             $request->validate([
                 'company_id' => 'required|exists:companies,id',
                 'plan_id' => 'required|exists:subscription_plans,id',
-                'duration_months' => 'required|integer|min:1|max:24',
+                'billing_period' => 'required|in:monthly,yearly',
+                'duration_months' => 'required|integer|min:1|max:36',
                 'selected_branches' => 'sometimes|array',
                 'selected_branches.*' => 'exists:branches,id',
 
@@ -144,27 +204,66 @@ class SubscriptionController extends Controller
                 }
             }
 
-            $paymentData = [
-                'payment_method' => $request->payment_method,
-                'amount_paid' => $request->amount_paid,
-                'payment_reference' => $request->payment_reference,
-                'auto_renew' => $request->boolean('auto_renew', false),
-                'renewal_token' => $request->renewal_token,
-            ];
+            // Begin database transaction
+            DB::beginTransaction();
 
-            $subscription = $this->subscriptionService->startOrRenew(
-                $company,
-                $plan,
-                $request->duration_months,
-                $paymentData,
-                $request->selected_branches ?? []
-            );
+            try {
+                $paymentData = [
+                    'payment_method' => $request->payment_method,
+                    'amount_paid' => $request->amount_paid,
+                    'payment_reference' => $request->payment_reference,
+                    'auto_renew' => $request->boolean('auto_renew', false),
+                    'renewal_token' => $request->renewal_token,
+                    'billing_period' => $request->billing_period,
+                ];
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Subscription created successfully',
-                'data' => $subscription->load(['company', 'plan', 'branches', 'payments']),
-            ], 201);
+                $subscription = $this->subscriptionService->startOrRenew(
+                    $company,
+                    $plan,
+                    $request->duration_months,
+                    $paymentData,
+                    $request->selected_branches ?? []
+                );
+
+                // Commit the transaction before sending email
+                DB::commit();
+
+                // Generate invoice and send email to company (outside transaction)
+                $payment = $subscription->payments()->latest()->first();
+                $invoice = null;
+                $invoiceData = null;
+                $emailResult = null;
+
+                if ($payment) {
+                    $invoiceData = $this->invoiceService->generateInvoiceData($payment);
+
+                    // Send invoice email to company with PDF attachment
+                    try {
+                        $emailResult = $this->invoiceService->sendInvoiceEmail($payment);
+
+                        $invoice = [
+                            'invoice_number' => $emailResult['invoice_number'],
+                            'url' => $emailResult['pdf_url'],
+                            'download_url' => route('invoices.download', ['payment' => $payment->id]),
+                        ];
+                    } catch (\Exception $emailException) {
+                        // Log email error but don't fail the subscription
+                        \Log::error('Failed to send invoice email: ' . $emailException->getMessage());
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Subscription created successfully. Invoice sent to ' . ($emailResult['email_sent_to'] ?? 'company'),
+                    'data' => $subscription->load(['company', 'plan', 'branches', 'payments']),
+                    'invoice' => $invoiceData,
+                    'invoice_pdf' => $invoice,
+                    'email_sent_to' => $emailResult['email_sent_to'] ?? null,
+                ], 201);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -375,6 +474,99 @@ class SubscriptionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve statistics',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Download invoice PDF for a payment.
+     */
+    public function downloadInvoice(Payment $payment)
+    {
+        try {
+            return $this->invoiceService->downloadInvoice($payment);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to download invoice',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * View invoice PDF in browser.
+     */
+    public function viewInvoice(Payment $payment)
+    {
+        try {
+            return $this->invoiceService->streamInvoice($payment);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to view invoice',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get invoice data as JSON.
+     */
+    public function getInvoiceData(Payment $payment): JsonResponse
+    {
+        try {
+            $invoiceData = $this->invoiceService->generateInvoiceData($payment);
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoiceData,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve invoice data',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all invoices (payments) for a subscription.
+     */
+    public function getSubscriptionInvoices(Subscription $subscription): JsonResponse
+    {
+        try {
+            $payments = $subscription->payments()
+                ->with(['company', 'subscriptionPlan'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            $invoices = $payments->map(function ($payment) {
+                return [
+                    'payment_id' => $payment->id,
+                    'amount' => $payment->amount_paid,
+                    'currency' => $payment->subscriptionPlan->currency ?? 'USD',
+                    'status' => $payment->status,
+                    'payment_method' => $payment->payment_method,
+                    'payment_reference' => $payment->payment_reference,
+                    'period_start' => $payment->period_start,
+                    'period_end' => $payment->period_end,
+                    'created_at' => $payment->created_at,
+                    'download_url' => route('invoices.download', ['payment' => $payment->id]),
+                    'view_url' => route('invoices.view', ['payment' => $payment->id]),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $invoices,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve invoices',
                 'error' => $e->getMessage(),
             ], 500);
         }
