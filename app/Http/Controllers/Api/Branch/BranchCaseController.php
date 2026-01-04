@@ -2022,17 +2022,17 @@ class BranchCaseController extends Controller
             }
 
             $trackingService = app(CaseTrackingService::class);
-            
+
             // Get timeline
             $includeInternal = $request->boolean('include_internal', true);
             $timeline = $trackingService->getTimeline($case, $includeInternal);
-            
+
             // Get duration summary
             $durationSummary = $trackingService->getDurationSummary($case);
-            
+
             // Get current stage
             $currentStage = $trackingService->getCurrentStage($case);
-            
+
             // Get escalations
             $escalations = \App\Models\CaseEscalation::where('case_id', $id)
                 ->with(['escalationRule:id,name', 'resolvedBy:id,name'])
