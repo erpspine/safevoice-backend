@@ -12,6 +12,7 @@ use App\Models\Company;
 use App\Models\Branch;
 use App\Models\Department;
 use App\Models\IncidentCategory;
+use App\Models\FeedbackCategory;
 use App\Models\User;
 use App\Models\Notification;
 use App\Services\AutoThreadService;
@@ -70,6 +71,7 @@ class CaseSubmissionController extends Controller
             'type' => 'required|string|in:incident,feedback',
             'company_id' => 'required|string|exists:companies,id',
             'branch_id' => 'nullable|string|exists:branches,id',
+            'subject' => 'nullable|string|max:255',
             'description' => 'required|string',
             'location_description' => 'nullable|string|max:255',
             'date_time_type' => 'nullable|string',
@@ -81,11 +83,15 @@ class CaseSubmissionController extends Controller
             'contact_info.email' => 'nullable|email|max:255',
             'contact_info.phone' => 'nullable|string|max:20',
             'contact_info.is_anonymous' => 'nullable|boolean',
-            // Incident Categories (user selection)
+            // Categories (user selection) - supports both 'categories' and 'case_categories' field names
             'categories' => 'nullable|array',
-            'categories.*.category_id' => 'required|string|exists:incident_categories,id',
-            'categories.*.parent_category_id' => 'nullable|string|exists:incident_categories,id',
+            'categories.*.category_id' => 'required|string',
+            'categories.*.parent_category_id' => 'nullable|string',
             'categories.*.is_primary' => 'nullable|boolean',
+            'case_categories' => 'nullable|array',
+            'case_categories.*.category_id' => 'required|string',
+            'case_categories.*.parent_category_id' => 'nullable|string',
+            'case_categories.*.is_primary' => 'nullable|boolean',
             'involved_parties' => 'nullable|array',
             'involved_parties.*.employee_id' => 'required|string|max:50',
             'involved_parties.*.nature_of_involvement' => 'required|string',
@@ -132,6 +138,7 @@ class CaseSubmissionController extends Controller
                 'company_id' => $request->company_id,
                 'branch_id' => $request->branch_id,
                 'type' => $request->type,
+                'title' => $request->subject, // Map subject to title field
                 'description' => $request->description,
                 'location_description' => $request->location_description,
                 'date_time_type' => $request->date_time_type ?? 'general',
@@ -152,13 +159,24 @@ class CaseSubmissionController extends Controller
                 'is_anonymous' => $isAnonymous
             ]);
 
-            // Handle user-selected incident categories
+            // Handle user-selected categories (supports both 'categories' and 'case_categories' field names)
             $savedCategories = [];
             $categoriesInput = $request->input('categories', []);
 
+            // Also check for 'case_categories' field (alternative field name)
+            if (empty($categoriesInput)) {
+                $categoriesInput = $request->input('case_categories', []);
+            }
+
+            // Determine category type based on case type
+            $categoryType = $request->type === 'feedback' ? 'feedback' : 'incident';
+            $categoryModel = $request->type === 'feedback' ? FeedbackCategory::class : IncidentCategory::class;
+
             Log::info('Categories input received', [
                 'case_id' => $case->id,
-                'has_categories' => $request->has('categories'),
+                'case_type' => $request->type,
+                'category_type' => $categoryType,
+                'has_categories' => $request->has('categories') || $request->has('case_categories'),
                 'categories_count' => is_array($categoriesInput) ? count($categoriesInput) : 0,
                 'categories_data' => $categoriesInput,
             ]);
@@ -167,8 +185,8 @@ class CaseSubmissionController extends Controller
                 $isPrimarySet = false;
 
                 foreach ($categoriesInput as $index => $categoryData) {
-                    // Verify the category belongs to the selected company
-                    $category = IncidentCategory::where('id', $categoryData['category_id'] ?? null)
+                    // Verify the category belongs to the selected company using the appropriate model
+                    $category = $categoryModel::where('id', $categoryData['category_id'] ?? null)
                         ->where('company_id', $request->company_id)
                         ->where('status', true)
                         ->first();
@@ -176,6 +194,7 @@ class CaseSubmissionController extends Controller
                     if (!$category) {
                         Log::warning('Invalid category skipped', [
                             'case_id' => $case->id,
+                            'category_type' => $categoryType,
                             'category_data' => $categoryData,
                             'company_id' => $request->company_id,
                         ]);
@@ -185,7 +204,7 @@ class CaseSubmissionController extends Controller
                     // Verify parent category if provided
                     $parentCategoryId = null;
                     if (!empty($categoryData['parent_category_id'])) {
-                        $parentCategory = IncidentCategory::where('id', $categoryData['parent_category_id'])
+                        $parentCategory = $categoryModel::where('id', $categoryData['parent_category_id'])
                             ->where('company_id', $request->company_id)
                             ->whereNull('parent_id') // Must be a root category
                             ->where('status', true)
@@ -209,7 +228,7 @@ class CaseSubmissionController extends Controller
                         'case_id' => $case->id,
                         'category_id' => $category->id,
                         'parent_category_id' => $parentCategoryId,
-                        'category_type' => 'incident',
+                        'category_type' => $categoryType,
                         'categorization_source' => 'user',
                         'is_primary' => $isPrimary,
                         'confidence_level' => 'high', // User-selected = high confidence
@@ -222,7 +241,7 @@ class CaseSubmissionController extends Controller
                         'category_id' => $category->id,
                         'category_name' => $category->name,
                         'parent_category_id' => $parentCategoryId,
-                        'parent_category_name' => $parentCategoryId ? IncidentCategory::find($parentCategoryId)?->name : null,
+                        'parent_category_name' => $parentCategoryId ? $categoryModel::find($parentCategoryId)?->name : null,
                         'is_primary' => $isPrimary,
                     ];
                 }

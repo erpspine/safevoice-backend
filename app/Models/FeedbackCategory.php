@@ -17,9 +17,12 @@ class FeedbackCategory extends BaseModel
      */
     protected $fillable = [
         'company_id',
+        'parent_id',
         'name',
+        'category_key',
         'status',
         'description',
+        'sort_order',
     ];
 
     /**
@@ -29,6 +32,7 @@ class FeedbackCategory extends BaseModel
      */
     protected $casts = [
         'status' => 'boolean',
+        'sort_order' => 'integer',
     ];
 
     /**
@@ -37,6 +41,30 @@ class FeedbackCategory extends BaseModel
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /**
+     * Get the parent category.
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(FeedbackCategory::class, 'parent_id');
+    }
+
+    /**
+     * Get the child categories (subcategories).
+     */
+    public function children(): HasMany
+    {
+        return $this->hasMany(FeedbackCategory::class, 'parent_id');
+    }
+
+    /**
+     * Get all descendants (recursive children).
+     */
+    public function descendants(): HasMany
+    {
+        return $this->children()->with('descendants');
     }
 
     /**
@@ -86,5 +114,48 @@ class FeedbackCategory extends BaseModel
     public function scopeForCompany($query, $companyId)
     {
         return $query->where('company_id', $companyId);
+    }
+
+    /**
+     * Scope to only get parent (root) categories.
+     */
+    public function scopeParents($query)
+    {
+        return $query->whereNull('parent_id');
+    }
+
+    /**
+     * Scope to only get child (sub) categories.
+     */
+    public function scopeChildren($query)
+    {
+        return $query->whereNotNull('parent_id');
+    }
+
+    /**
+     * Check if this is a parent category.
+     */
+    public function isParent(): bool
+    {
+        return is_null($this->parent_id);
+    }
+
+    /**
+     * Check if this is a child category.
+     */
+    public function isChild(): bool
+    {
+        return !is_null($this->parent_id);
+    }
+
+    /**
+     * Get the full path name (Parent > Child).
+     */
+    public function getFullNameAttribute(): string
+    {
+        if ($this->parent) {
+            return $this->parent->name . ' > ' . $this->name;
+        }
+        return $this->name;
     }
 }

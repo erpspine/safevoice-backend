@@ -395,4 +395,190 @@ class FeedbackCategoryController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Public API to get feedback categories for a specific company (no authentication required).
+     * Returns only active feedback categories with hierarchical structure (parent with nested subcategories).
+     */
+    public function publicByCompany(string $companyId): JsonResponse
+    {
+        try {
+            // Verify company exists and is active
+            $company = Company::where('id', $companyId)
+                ->where('status', true)
+                ->firstOrFail();
+
+            // Get active root feedback categories for the company with their active subcategories
+            $categories = FeedbackCategory::where('company_id', $companyId)
+                ->whereNull('parent_id') // Only root categories
+                ->where('status', true) // Only active categories
+                ->with(['children' => function ($query) {
+                    $query->where('status', true)
+                        ->select(['id', 'parent_id', 'name', 'description'])
+                        ->orderBy('sort_order')
+                        ->orderBy('name');
+                }])
+                ->select([
+                    'id',
+                    'name',
+                    'description',
+                ])
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Feedback categories retrieved successfully.',
+                'data' => $categories
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company not found or inactive.',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve feedback categories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Public API to get all active feedback categories (no authentication required).
+     * Returns only active feedback categories for frontend dropdowns and forms.
+     */
+    public function publicIndex(): JsonResponse
+    {
+        try {
+            // Get all active feedback categories with company info
+            $categories = FeedbackCategory::where('status', true)
+                ->with(['company:id,name'])
+                ->select([
+                    'id',
+                    'company_id',
+                    'name',
+                    'description',
+                ])
+                ->orderBy('name', 'asc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Feedback categories retrieved successfully.',
+                'data' => [
+                    'categories' => $categories,
+                    'total' => $categories->count()
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve feedback categories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Public API to get parent (root) feedback categories for a specific company.
+     * Used for the first dropdown in user portal feedback submission.
+     */
+    public function publicParentCategories(string $companyId): JsonResponse
+    {
+        try {
+            // Verify company exists and is active
+            $company = Company::where('id', $companyId)
+                ->where('status', true)
+                ->firstOrFail();
+
+            // Get only parent categories (no parent_id)
+            $categories = FeedbackCategory::where('company_id', $companyId)
+                ->whereNull('parent_id')
+                ->where('status', true)
+                ->select(['id', 'name', 'description'])
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Parent feedback categories retrieved successfully.',
+                'data' => [
+                    'company_id' => $companyId,
+                    'company_name' => $company->name,
+                    'categories' => $categories,
+                    'total' => $categories->count()
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company not found or inactive.',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve parent feedback categories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Public API to get subcategories for a specific parent feedback category.
+     * Used for the second dropdown in user portal feedback submission.
+     */
+    public function publicSubcategories(string $companyId, string $parentId): JsonResponse
+    {
+        try {
+            // Verify company exists and is active
+            $company = Company::where('id', $companyId)
+                ->where('status', true)
+                ->firstOrFail();
+
+            // Verify parent category exists and belongs to the company
+            $parentCategory = FeedbackCategory::where('id', $parentId)
+                ->where('company_id', $companyId)
+                ->where('status', true)
+                ->whereNull('parent_id')
+                ->firstOrFail();
+
+            // Get subcategories for this parent
+            $subcategories = FeedbackCategory::where('company_id', $companyId)
+                ->where('parent_id', $parentId)
+                ->where('status', true)
+                ->select(['id', 'name', 'description'])
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Feedback subcategories retrieved successfully.',
+                'data' => [
+                    'company_id' => $companyId,
+                    'parent_category' => [
+                        'id' => $parentCategory->id,
+                        'name' => $parentCategory->name,
+                    ],
+                    'subcategories' => $subcategories,
+                    'total' => $subcategories->count()
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company, or parent category not found.',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve feedback subcategories.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
 }

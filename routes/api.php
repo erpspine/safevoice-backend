@@ -48,6 +48,8 @@ use App\Http\Controllers\Api\InvestigatorAllocationController;
 use App\Http\Controllers\Api\Admin\AdminDashboardController;
 use App\Http\Controllers\Api\Admin\IncidentReportController;
 use App\Http\Controllers\Api\Admin\SectorIncidentTemplateController;
+use App\Http\Controllers\Api\Admin\SectorFeedbackTemplateController;
+use App\Http\Controllers\Api\Admin\SectorDepartmentTemplateController;
 use App\Http\Controllers\Api\Admin\CaseTrackingController;
 use App\Http\Controllers\Api\Admin\EscalationRuleController;
 
@@ -132,6 +134,18 @@ Route::prefix('public')->group(function () {
 
     // Get subcategories for a specific parent category (for second dropdown)
     Route::get('companies/{companyId}/incident-categories/{parentId}/subcategories', [IncidentCategoryController::class, 'publicSubcategories'])->name('public.companies.incident-categories.subcategories');
+
+    // Get feedback categories (all active)
+    Route::get('feedback-categories', [FeedbackCategoryController::class, 'publicIndex'])->name('public.feedback-categories.index');
+
+    // Get feedback categories for a particular company (hierarchical - parent with nested subcategories)
+    Route::get('companies/{companyId}/feedback-categories', [FeedbackCategoryController::class, 'publicByCompany'])->name('public.companies.feedback-categories');
+
+    // Get parent (root) feedback categories only for a company (for first dropdown)
+    Route::get('companies/{companyId}/feedback-categories/parents', [FeedbackCategoryController::class, 'publicParentCategories'])->name('public.companies.feedback-categories.parents');
+
+    // Get subcategories for a specific parent feedback category (for second dropdown)
+    Route::get('companies/{companyId}/feedback-categories/{parentId}/subcategories', [FeedbackCategoryController::class, 'publicSubcategories'])->name('public.companies.feedback-categories.subcategories');
 
     // Debug route to test payload
     Route::post('cases/test-payload', function (Request $request) {
@@ -256,6 +270,22 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::apiResource('feedback-categories', FeedbackCategoryController::class);
     Route::get('feedback-categories/statistics/dashboard', [FeedbackCategoryController::class, 'statistics'])->name('admin.feedback-categories.statistics');
     Route::get('companies/{companyId}/feedback-categories', [FeedbackCategoryController::class, 'byCompany'])->name('admin.companies.feedback-categories');
+
+    // Sector Feedback Template Management (Feedback Category Templates)
+    Route::apiResource('feedback-category-templates', SectorFeedbackTemplateController::class);
+    Route::get('feedback-category-templates/statistics/dashboard', [SectorFeedbackTemplateController::class, 'statistics'])->name('admin.feedback-category-templates.statistics');
+    Route::get('feedback-category-templates/sector/{sector}', [SectorFeedbackTemplateController::class, 'bySector'])->name('admin.feedback-category-templates.by-sector');
+    Route::post('feedback-category-templates/sector/{sector}/sync', [SectorFeedbackTemplateController::class, 'syncToCompanies'])->name('admin.feedback-category-templates.sync-to-companies');
+    Route::post('feedback-category-templates/bulk', [SectorFeedbackTemplateController::class, 'bulkStore'])->name('admin.feedback-category-templates.bulk-store');
+    Route::delete('feedback-category-templates/sector/{sector}', [SectorFeedbackTemplateController::class, 'destroyBySector'])->name('admin.feedback-category-templates.destroy-by-sector');
+
+    // Sector Department Template Management (Department Templates)
+    Route::apiResource('department-templates', SectorDepartmentTemplateController::class);
+    Route::get('department-templates/statistics/dashboard', [SectorDepartmentTemplateController::class, 'statistics'])->name('admin.department-templates.statistics');
+    Route::get('department-templates/sector/{sector}', [SectorDepartmentTemplateController::class, 'bySector'])->name('admin.department-templates.by-sector');
+    Route::post('department-templates/sector/{sector}/sync', [SectorDepartmentTemplateController::class, 'syncToCompanies'])->name('admin.department-templates.sync-to-companies');
+    Route::post('department-templates/bulk', [SectorDepartmentTemplateController::class, 'bulkStore'])->name('admin.department-templates.bulk-store');
+    Route::delete('department-templates/sector/{sector}', [SectorDepartmentTemplateController::class, 'destroyBySector'])->name('admin.department-templates.destroy-by-sector');
 
     // User Management
     Route::apiResource('users', UserController::class);

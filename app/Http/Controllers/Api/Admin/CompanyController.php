@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\SubscriptionPlan;
 use App\Services\IncidentCategoryService;
+use App\Services\FeedbackCategoryService;
+use App\Services\DepartmentTemplateService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -83,6 +85,18 @@ class CompanyController extends Controller
             if ($company->sector) {
                 $categoryService = new IncidentCategoryService();
                 $categories = $categoryService->createCategoriesFromSector($company);
+            }
+
+            // Auto-populate feedback categories based on sector
+            if ($company->sector) {
+                $feedbackCategoryService = new FeedbackCategoryService();
+                $feedbackCategories = $feedbackCategoryService->createCategoriesFromSector($company);
+            }
+
+            // Auto-populate departments based on sector
+            if ($company->sector) {
+                $departmentService = new DepartmentTemplateService();
+                $departments = $departmentService->createDepartmentsFromSector($company);
             }
 
             // Load the subscription plan relationship if exists
@@ -235,14 +249,58 @@ class CompanyController extends Controller
             // 1. Sector changed (from one value to another)
             // 2. Sector exists but company has no categories (initial sync)
             // 3. Sector was set from null to a value
+            // 4. Company has fewer incident categories than templates (partial sync needed)
             $syncResult = null;
             $categoryService = new IncidentCategoryService();
 
             if ($company->sector) {
                 $existingCategoriesCount = $company->incidentCategories()->count();
+                $incidentTemplateCount = \App\Models\SectorIncidentTemplate::where('sector', $company->sector)
+                    ->where('status', true)
+                    ->count();
 
-                if ($sectorChanged || $existingCategoriesCount === 0) {
+                // Sync if sector changed, no categories exist, or categories are incomplete
+                if ($sectorChanged || $existingCategoriesCount === 0 || $existingCategoriesCount < $incidentTemplateCount) {
                     $syncResult = $categoryService->syncCategoriesFromSector($company);
+                }
+            }
+
+            // Auto-sync feedback categories if:
+            // 1. Sector changed (from one value to another)
+            // 2. Sector exists but company has no feedback categories (initial sync)
+            // 3. Sector was set from null to a value
+            // 4. Company has fewer feedback categories than templates (partial sync needed)
+            $feedbackSyncResult = null;
+            $feedbackCategoryService = new FeedbackCategoryService();
+
+            if ($company->sector) {
+                $existingFeedbackCategoriesCount = $company->feedbackCategories()->count();
+                $templateCount = \App\Models\SectorFeedbackTemplate::where('sector', $company->sector)
+                    ->where('status', true)
+                    ->count();
+
+                // Sync if sector changed, no categories exist, or categories are incomplete
+                if ($sectorChanged || $existingFeedbackCategoriesCount === 0 || $existingFeedbackCategoriesCount < $templateCount) {
+                    $feedbackSyncResult = $feedbackCategoryService->syncCategoriesFromSector($company);
+                }
+            }
+
+            // Auto-sync departments if:
+            // 1. Sector changed (from one value to another)
+            // 2. Sector exists but company has no departments (initial sync)
+            // 3. Company has fewer departments than templates (partial sync needed)
+            $departmentSyncResult = null;
+            $departmentService = new DepartmentTemplateService();
+
+            if ($company->sector) {
+                $existingDepartmentsCount = $company->departments()->count();
+                $departmentTemplateCount = \App\Models\SectorDepartmentTemplate::where('sector', $company->sector)
+                    ->where('status', true)
+                    ->count();
+
+                // Sync if sector changed, no departments exist, or departments are incomplete
+                if ($sectorChanged || $existingDepartmentsCount === 0 || $existingDepartmentsCount < $departmentTemplateCount) {
+                    $departmentSyncResult = $departmentService->syncDepartmentsFromSector($company);
                 }
             }
 
@@ -260,6 +318,16 @@ class CompanyController extends Controller
             // Include sync result if categories were synced
             if ($syncResult) {
                 $response['data']['category_sync'] = $syncResult;
+            }
+
+            // Include feedback sync result if categories were synced
+            if ($feedbackSyncResult) {
+                $response['data']['feedback_category_sync'] = $feedbackSyncResult;
+            }
+
+            // Include department sync result if departments were synced
+            if ($departmentSyncResult) {
+                $response['data']['department_sync'] = $departmentSyncResult;
             }
 
             return response()->json($response);
