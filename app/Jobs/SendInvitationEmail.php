@@ -17,16 +17,16 @@ class SendInvitationEmail implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected $userId;
-    protected $temporaryPassword;
+    protected $invitationUrl;
     protected $isAdminUser;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(string $userId, string $temporaryPassword, bool $isAdminUser)
+    public function __construct(string $userId, string $invitationUrl, bool $isAdminUser)
     {
         $this->userId = $userId;
-        $this->temporaryPassword = $temporaryPassword;
+        $this->invitationUrl = $invitationUrl;
         $this->isAdminUser = $isAdminUser;
     }
 
@@ -45,7 +45,7 @@ class SendInvitationEmail implements ShouldQueue
             }
 
             Mail::to($user->email)->send(
-                new UserInvitation($user, $this->temporaryPassword, $this->isAdminUser)
+                new UserInvitation($user, $this->invitationUrl, $this->isAdminUser)
             );
 
             Log::info('Invitation email sent successfully', [

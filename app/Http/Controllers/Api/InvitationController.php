@@ -14,6 +14,34 @@ use Carbon\Carbon;
 class InvitationController extends Controller
 {
     /**
+     * Get login URL based on user role
+     */
+    private function getLoginUrl(string $role): string
+    {
+        return match($role) {
+            'super_admin', 'admin' => '/api/admin/auth/login',
+            'company_admin' => '/api/company/auth/login',
+            'branch_admin', 'branch_manager' => '/api/branch/auth/login',
+            'investigator' => '/api/investigator/auth/login',
+            default => '/api/user/auth/login',
+        };
+    }
+
+    /**
+     * Get dashboard URL based on user role
+     */
+    private function getDashboardUrl(string $role): string
+    {
+        return match($role) {
+            'super_admin', 'admin' => '/admin/dashboard',
+            'company_admin' => '/company-portal/dashboard',
+            'branch_admin', 'branch_manager' => '/branch-portal/dashboard',
+            'investigator' => '/investigator/dashboard',
+            default => '/dashboard',
+        };
+    }
+
+    /**
      * Verify invitation token
      */
     public function verifyToken(Request $request): JsonResponse
@@ -45,7 +73,8 @@ class InvitationController extends Controller
                     'company' => $user->company?->name,
                     'branch' => $user->branch?->name,
                     'department' => $user->department?->name,
-                ]
+                ],
+                'login_url' => $this->getLoginUrl($user->role),
             ]
         ]);
     }
@@ -108,6 +137,9 @@ class InvitationController extends Controller
                     ],
                     'token' => $token,
                     'token_type' => 'Bearer',
+                    'login_url' => $this->getLoginUrl($user->role),
+                    'dashboard_url' => $this->getDashboardUrl($user->role),
+                    'redirect_to' => 'dashboard', // Tells frontend to redirect to dashboard
                 ]
             ]);
         } catch (\Exception $e) {
@@ -162,6 +194,7 @@ class InvitationController extends Controller
                     ] : null,
                 ],
                 'expires_at' => $user->invitation_expires_at->toDateTimeString(),
+                'login_url' => $this->getLoginUrl($user->role),
             ]
         ]);
     }

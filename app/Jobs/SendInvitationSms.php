@@ -16,16 +16,16 @@ class SendInvitationSms implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected $userId;
-    protected $temporaryPassword;
+    protected $invitationUrl;
     protected $isAdminUser;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(string $userId, string $temporaryPassword, bool $isAdminUser)
+    public function __construct(string $userId, string $invitationUrl, bool $isAdminUser)
     {
         $this->userId = $userId;
-        $this->temporaryPassword = $temporaryPassword;
+        $this->invitationUrl = $invitationUrl;
         $this->isAdminUser = $isAdminUser;
     }
 
@@ -51,18 +51,14 @@ class SendInvitationSms implements ShouldQueue
 
             $smsService = new SmsService();
 
-            // Create invitation link
-            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:3000'));
-            $invitationLink = "{$frontendUrl}/accept-invitation?token={$user->invitation_token}";
-
             // Determine company name
             $companyName = $user->company ? $user->company->name : 'SafeVoice';
 
-            // Send SMS
+            // Send SMS with the invitation URL
             $result = $smsService->sendInvitation(
                 $user->phone_number,
                 $user->name,
-                $invitationLink,
+                $this->invitationUrl,
                 $companyName
             );
 

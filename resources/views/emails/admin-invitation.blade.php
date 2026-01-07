@@ -90,21 +90,19 @@
             admin panel with <strong>{{ ucfirst(str_replace('_', ' ', $user->role)) }}</strong> privileges.</p>
 
         <div class="credentials">
-            <h3>Your Login Credentials</h3>
+            <h3>Your Account Details</h3>
             <p><strong>Email:</strong> {{ $user->email }}</p>
-            <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
             <p><strong>Role:</strong> {{ ucfirst(str_replace('_', ' ', $user->role)) }}</p>
         </div>
 
         <div class="warning">
-            <strong>Important:</strong> This is a temporary password. You will be required to change it upon your first
-            login for security purposes.
+            <strong>Important:</strong> Please click the button below to complete your registration and create your password. This invitation link will expire in 7 days.
         </div>
 
         <div style="text-align: center;">
-            <a href="{{ config('app.frontend_url') ?? env('FRONTEND_URL', 'http://localhost:3000') }}/admin/login?token={{ $user->invitation_token }}"
+            <a href="{{ $invitationUrl }}"
                 style="display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                Accept Invitation & Set Password
+                Complete Registration & Create Password
             </a>
         </div>
 
@@ -123,7 +121,7 @@
         </div>
 
         <div class="footer">
-            <p><strong>Login URL:</strong> <a href="{{ $loginUrl }}">{{ $loginUrl }}</a></p>
+            <p><strong>Dashboard URL:</strong> <a href="{{ $dashboardUrl }}">{{ $dashboardUrl }}</a></p>
 
             <p>If you have any questions or need assistance, please contact the system administrator.</p>
 

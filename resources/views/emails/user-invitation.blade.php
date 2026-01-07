@@ -124,9 +124,8 @@
         @endif
 
         <div class="credentials">
-            <h3>Your Login Credentials</h3>
+            <h3>Your Account Details</h3>
             <p><strong>Email:</strong> {{ $user->email }}</p>
-            <p><strong>Temporary Password:</strong> <code>{{ $temporaryPassword }}</code></p>
             <p><strong>Role:</strong> {{ ucfirst(str_replace('_', ' ', $user->role)) }}</p>
             @if ($user->department)
                 <p><strong>Department:</strong> {{ $user->department->name }}</p>
@@ -137,14 +136,13 @@
         </div>
 
         <div class="warning">
-            <strong>Important:</strong> This is a temporary password. You will be required to change it upon your first
-            login for security purposes.
+            <strong>Important:</strong> Please click the button below to complete your registration and create your password. This invitation link will expire in 7 days.
         </div>
 
         <div style="text-align: center;">
-            <a href="{{ config('app.frontend_url') ?? env('FRONTEND_URL', 'http://localhost:3000') }}/login?token={{ $user->invitation_token }}"
+            <a href="{{ $invitationUrl }}"
                 style="display: inline-block; padding: 12px 24px; background-color: #28a745; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                Accept Invitation & Set Password
+                Complete Registration & Create Password
             </a>
         </div>
 
@@ -161,9 +159,9 @@
 
         <p><strong>Getting Started:</strong></p>
         <ol>
-            <li>Click the "Access SafeVoice Platform" button above</li>
-            <li>Log in using your email and temporary password</li>
-            <li>Set up your new secure password</li>
+            <li>Click the "Complete Registration & Create Password" button above</li>
+            <li>Create your secure password</li>
+            <li>You'll be automatically logged in</li>
             <li>Complete your profile setup</li>
             <li>Familiarize yourself with the platform features</li>
         </ol>
@@ -174,7 +172,7 @@
         </div>
 
         <div class="footer">
-            <p><strong>Login URL:</strong> <a href="{{ $loginUrl }}">{{ $loginUrl }}</a></p>
+            <p><strong>Dashboard URL:</strong> <a href="{{ $dashboardUrl }}">{{ $dashboardUrl }}</a></p>
 
             <p>If you have any questions about using SafeVoice or need assistance with your account, please contact your
                 system administrator or HR department.</p>

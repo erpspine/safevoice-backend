@@ -175,9 +175,9 @@ class UserController extends Controller
                 }
             }
 
-            // Generate invitation token and temporary password
+            // Generate invitation token (no password yet)
             $invitationToken = Str::random(64);
-            $temporaryPassword = Str::random(12);
+            $invitationUrl = config('app.frontend_url', 'http://localhost:3000') . '/accept-invitation?token=' . $invitationToken;
 
             // Create user data
             $userData = [
@@ -187,7 +187,7 @@ class UserController extends Controller
                 'sms_invitation' => $request->sms_invitation ?? false,
                 'role' => $request->role,
                 'status' => $request->status ?? 'pending',
-                'password' => Hash::make($temporaryPassword),
+                'password' => null, // No password yet - user will create it
                 'invitation_token' => $invitationToken,
                 'invitation_expires_at' => now()->addDays(7),
                 'is_verified' => false,
@@ -219,24 +219,26 @@ class UserController extends Controller
             DB::commit();
 
             // Queue invitation email
-            SendInvitationEmail::dispatch($user->id, $temporaryPassword, $isAdminUser);
+            SendInvitationEmail::dispatch($user->id, $invitationUrl, $isAdminUser);
             $emailQueued = true;
 
             // Queue SMS invitation if requested and phone number provided
             $smsQueued = false;
             if ($user->sms_invitation && $user->phone_number) {
-                SendInvitationSms::dispatch($user->id, $temporaryPassword, $isAdminUser);
+                SendInvitationSms::dispatch($user->id, $invitationUrl, $isAdminUser);
                 $smsQueued = true;
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'User created successfully and invitations queued',
+                'message' => 'User created successfully. Invitation sent with token link.',
                 'data' => [
                     'user' => $user->load(['company:id,name', 'branch:id,name']),
+                    'invitation_token' => $invitationToken,
+                    'invitation_url' => $invitationUrl,
+                    'invitation_expires_at' => $user->invitation_expires_at,
                     'email_invitation_queued' => $emailQueued,
                     'sms_invitation_queued' => $smsQueued,
-                    'invitation_expires_at' => $user->invitation_expires_at,
                 ]
             ], 201);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -604,18 +606,14 @@ class UserController extends Controller
                 ], 422);
             }
 
-            // Generate new invitation token and extend expiry
+            // Generate new invitation token and extend expiry (no password yet)
             $invitationToken = Str::random(64);
-            $temporaryPassword = Str::random(12);
+            $invitationUrl = config('app.frontend_url', 'http://localhost:3000') . '/accept-invitation?token=' . $invitationToken;
 
             $user->update([
                 'invitation_token' => $invitationToken,
                 'invitation_expires_at' => now()->addDays(7),
-                'password' => Hash::make($temporaryPassword),
             ]);
-
-            // Invalidate all existing tokens for this user (security measure for password change)
-            $user->tokens()->delete();
 
             // Determine if admin user
             $isAdminUser = in_array($user->role, ['super_admin', 'admin']);
@@ -624,20 +622,22 @@ class UserController extends Controller
             DB::commit();
 
             // Queue invitation email
-            SendInvitationEmail::dispatch($user->id, $temporaryPassword, $isAdminUser);
+            SendInvitationEmail::dispatch($user->id, $invitationUrl, $isAdminUser);
             $emailQueued = true;
 
             // Queue SMS invitation if requested and phone number provided
             $smsQueued = false;
             if ($user->sms_invitation && $user->phone_number) {
-                SendInvitationSms::dispatch($user->id, $temporaryPassword, $isAdminUser);
+                SendInvitationSms::dispatch($user->id, $invitationUrl, $isAdminUser);
                 $smsQueued = true;
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Invitation resent successfully and queued. All previous sessions have been invalidated.',
+                'message' => 'Invitation resent successfully. User can now create their password using the invitation link.',
                 'data' => [
+                    'invitation_token' => $invitationToken,
+                    'invitation_url' => $invitationUrl,
                     'invitation_expires_at' => $user->invitation_expires_at,
                     'email_invitation_queued' => $emailQueued,
                     'sms_invitation_queued' => $smsQueued,
@@ -863,10 +863,10 @@ class UserController extends Controller
     /**
      * Send invitation email to user.
      */
-    private function sendInvitationEmail(User $user, string $temporaryPassword, bool $isAdminUser): bool
+    private function sendInvitationEmail(User $user, string $invitationUrl, bool $isAdminUser): bool
     {
         try {
-            Mail::to($user->email)->send(new UserInvitation($user, $temporaryPassword, $isAdminUser));
+            Mail::to($user->email)->send(new UserInvitation($user, $invitationUrl, $isAdminUser));
             return true;
         } catch (\Exception $e) {
             // Log the error but don't fail the user creation
@@ -882,23 +882,19 @@ class UserController extends Controller
     /**
      * Send invitation SMS to user.
      */
-    private function sendInvitationSms(User $user, string $temporaryPassword, bool $isAdminUser): bool
+    private function sendInvitationSms(User $user, string $invitationUrl, bool $isAdminUser): bool
     {
         try {
             $smsService = new SmsService();
 
-            // Create invitation link
-            $frontendUrl = config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:3000'));
-            $invitationLink = "{$frontendUrl}/accept-invitation?token={$user->invitation_token}";
-
             // Determine company name
             $companyName = $user->company ? $user->company->name : 'SafeVoice';
 
-            // Send SMS
+            // Send SMS with the invitation URL
             $result = $smsService->sendInvitation(
                 $user->phone_number,
                 $user->name,
-                $invitationLink,
+                $invitationUrl,
                 $companyName
             );
 
