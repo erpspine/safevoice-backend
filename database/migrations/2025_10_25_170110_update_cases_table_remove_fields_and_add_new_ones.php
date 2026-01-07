@@ -12,18 +12,38 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('cases', function (Blueprint $table) {
-            // Remove columns
-            $table->dropColumn(['department_id', 'severity_level']);
+            // Remove columns if they exist
+            if (Schema::hasColumn('cases', 'department_id')) {
+                $table->dropColumn('department_id');
+            }
+            if (Schema::hasColumn('cases', 'severity_level')) {
+                $table->dropColumn('severity_level');
+            }
 
-            // Rename existing columns
-            $table->renameColumn('location', 'location_description');
-            $table->renameColumn('incident_date', 'date_occurred');
+            // Rename existing columns if they exist
+            if (Schema::hasColumn('cases', 'location') && !Schema::hasColumn('cases', 'location_description')) {
+                $table->renameColumn('location', 'location_description');
+            }
+            if (Schema::hasColumn('cases', 'incident_date') && !Schema::hasColumn('cases', 'date_occurred')) {
+                $table->renameColumn('incident_date', 'date_occurred');
+            }
 
-            // Add new columns
-            $table->string('date_time_type')->default('specific')->after('description');
-            $table->time('time_occurred')->nullable()->after('date_occurred');
-            $table->string('general_timeframe')->nullable()->after('time_occurred');
-            $table->string('company_relationship')->default('employee')->after('general_timeframe');
+            // Add new columns only if they don't exist
+            if (!Schema::hasColumn('cases', 'date_time_type')) {
+                $table->string('date_time_type')->default('specific')->after('description');
+            }
+            if (!Schema::hasColumn('cases', 'date_occurred')) {
+                $table->date('date_occurred')->nullable()->after('date_time_type');
+            }
+            if (!Schema::hasColumn('cases', 'time_occurred')) {
+                $table->time('time_occurred')->nullable()->after('date_occurred');
+            }
+            if (!Schema::hasColumn('cases', 'general_timeframe')) {
+                $table->string('general_timeframe')->nullable()->after('time_occurred');
+            }
+            if (!Schema::hasColumn('cases', 'company_relationship')) {
+                $table->string('company_relationship')->default('employee')->after('general_timeframe');
+            }
         });
     }
 
