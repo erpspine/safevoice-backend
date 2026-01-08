@@ -244,6 +244,12 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::apiResource('companies', CompanyController::class);
     Route::get('companies/statistics/dashboard', [CompanyController::class, 'statistics'])->name('admin.companies.statistics');
 
+    // Company Reassignment Routes (Delete and recreate from sector templates)
+    Route::post('companies/{id}/reassign-incident-categories', [CompanyController::class, 'reassignIncidentCategories'])->name('admin.companies.reassign-incident-categories');
+    Route::post('companies/{id}/reassign-feedback-categories', [CompanyController::class, 'reassignFeedbackCategories'])->name('admin.companies.reassign-feedback-categories');
+    Route::post('companies/{id}/reassign-departments', [CompanyController::class, 'reassignDepartments'])->name('admin.companies.reassign-departments');
+    Route::post('companies/{id}/reassign-all', [CompanyController::class, 'reassignAll'])->name('admin.companies.reassign-all');
+
     // Branch Management
     Route::apiResource('branches', BranchController::class);
     Route::get('companies/{companyId}/branches', [BranchController::class, 'byCompany'])->name('admin.companies.branches');

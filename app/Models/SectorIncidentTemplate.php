@@ -15,8 +15,11 @@ class SectorIncidentTemplate extends BaseModel
         'sector',
         'category_key',
         'category_name',
+        'category_name_sw',
         'subcategory_name',
+        'subcategory_name_sw',
         'description',
+        'description_sw',
         'status',
         'sort_order',
     ];
@@ -32,9 +35,13 @@ class SectorIncidentTemplate extends BaseModel
     ];
 
     /**
-     * Get templates by sector.
+     * Get templates by sector with localization support.
+     * 
+     * @param string $sector The sector to filter
+     * @param string $language Language code ('en' or 'sw')
+     * @return array
      */
-    public static function getBySector(string $sector): array
+    public static function getBySector(string $sector, string $language = 'en'): array
     {
         $templates = self::where('sector', $sector)
             ->where('status', true)
@@ -50,16 +57,34 @@ class SectorIncidentTemplate extends BaseModel
             if (!isset($grouped[$key])) {
                 $grouped[$key] = [
                     'category_key' => $key,
-                    'category_name' => $template->category_name,
+                    'category_name' => $template->getLocalizedField('category_name', $language),
+                    'description' => $template->getLocalizedField('description', $language),
                     'subcategories' => [],
                 ];
             }
             if ($template->subcategory_name) {
-                $grouped[$key]['subcategories'][] = $template->subcategory_name;
+                $grouped[$key]['subcategories'][] = $template->getLocalizedField('subcategory_name', $language);
             }
         }
 
         return array_values($grouped);
+    }
+
+    /**
+     * Get localized field value based on language.
+     * 
+     * @param string $field The base field name
+     * @param string $language Language code ('en' or 'sw')
+     * @return string|null
+     */
+    public function getLocalizedField(string $field, string $language = 'en'): ?string
+    {
+        if ($language === 'sw') {
+            $swahiliField = $field . '_sw';
+            return $this->$swahiliField ?? $this->$field;
+        }
+
+        return $this->$field;
     }
 
     /**

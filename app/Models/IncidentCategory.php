@@ -19,9 +19,11 @@ class IncidentCategory extends BaseModel
         'company_id',
         'parent_id',
         'name',
+        'name_sw',
         'category_key',
         'status',
         'description',
+        'description_sw',
         'sort_order',
     ];
 

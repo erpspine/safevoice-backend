@@ -61,7 +61,9 @@ class IncidentCategoryController extends Controller
         $validator = Validator::make($request->all(), [
             'company_id' => 'string|required|exists:companies,id',
             'name' => 'required|string|max:255',
+            'name_sw' => 'nullable|string|max:255',
             'description' => 'nullable|string',
+            'description_sw' => 'nullable|string',
             'status' => 'boolean',
         ]);
 
@@ -146,7 +148,9 @@ class IncidentCategoryController extends Controller
             $validator = Validator::make($request->all(), [
                 'company_id' => 'sometimes|string|required|exists:companies,id',
                 'name' => 'sometimes|required|string|max:255',
+                'name_sw' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
+                'description_sw' => 'nullable|string',
                 'status' => 'boolean',
             ]);
 
@@ -391,9 +395,24 @@ class IncidentCategoryController extends Controller
      * Public API to get parent (root) incident categories for a specific company.
      * Used for the first dropdown in user portal case submission.
      */
-    public function publicParentCategories(string $companyId): JsonResponse
+    public function publicParentCategories(Request $request, string $companyId): JsonResponse
     {
         try {
+            // Validate language parameter
+            $validator = Validator::make($request->all(), [
+                'language' => 'nullable|string|in:en,sw'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed.',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $language = $request->input('language', 'en');
+
             // Verify company exists and is active
             $company = Company::where('id', $companyId)
                 ->where('status', true)
@@ -403,15 +422,23 @@ class IncidentCategoryController extends Controller
             $categories = IncidentCategory::where('company_id', $companyId)
                 ->whereNull('parent_id')
                 ->where('status', true)
-                ->select(['id', 'name', 'description'])
+                ->select(['id', 'name', 'name_sw', 'description', 'description_sw'])
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($category) use ($language) {
+                    return [
+                        'id' => $category->id,
+                        'name' => $language === 'sw' ? ($category->name_sw ?? $category->name) : $category->name,
+                        'description' => $language === 'sw' ? ($category->description_sw ?? $category->description) : $category->description,
+                    ];
+                });
 
             return response()->json([
                 'success' => true,
                 'message' => 'Parent categories retrieved successfully.',
                 'data' => [
+                    'language' => $language,
                     'company_id' => $companyId,
                     'company_name' => $company->name,
                     'categories' => $categories,
@@ -436,9 +463,24 @@ class IncidentCategoryController extends Controller
      * Public API to get subcategories for a specific parent category.
      * Used for the second dropdown in user portal case submission.
      */
-    public function publicSubcategories(string $companyId, string $parentId): JsonResponse
+    public function publicSubcategories(Request $request, string $companyId, string $parentId): JsonResponse
     {
         try {
+            // Validate language parameter
+            $validator = Validator::make($request->all(), [
+                'language' => 'nullable|string|in:en,sw'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed.',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $language = $request->input('language', 'en');
+
             // Verify company exists and is active
             $company = Company::where('id', $companyId)
                 ->where('status', true)
@@ -449,25 +491,34 @@ class IncidentCategoryController extends Controller
                 ->where('company_id', $companyId)
                 ->where('status', true)
                 ->whereNull('parent_id')
+                ->select(['id', 'name', 'name_sw'])
                 ->firstOrFail();
 
             // Get subcategories for this parent
             $subcategories = IncidentCategory::where('company_id', $companyId)
                 ->where('parent_id', $parentId)
                 ->where('status', true)
-                ->select(['id', 'name', 'description'])
+                ->select(['id', 'name', 'name_sw', 'description', 'description_sw'])
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($category) use ($language) {
+                    return [
+                        'id' => $category->id,
+                        'name' => $language === 'sw' ? ($category->name_sw ?? $category->name) : $category->name,
+                        'description' => $language === 'sw' ? ($category->description_sw ?? $category->description) : $category->description,
+                    ];
+                });
 
             return response()->json([
                 'success' => true,
                 'message' => 'Subcategories retrieved successfully.',
                 'data' => [
+                    'language' => $language,
                     'company_id' => $companyId,
                     'parent_category' => [
                         'id' => $parentCategory->id,
-                        'name' => $parentCategory->name,
+                        'name' => $language === 'sw' ? ($parentCategory->name_sw ?? $parentCategory->name) : $parentCategory->name,
                     ],
                     'subcategories' => $subcategories,
                     'total' => $subcategories->count()

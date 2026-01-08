@@ -19,9 +19,11 @@ class FeedbackCategory extends BaseModel
         'company_id',
         'parent_id',
         'name',
+        'name_sw',
         'category_key',
         'status',
         'description',
+        'description_sw',
         'sort_order',
     ];
 
@@ -62,7 +64,7 @@ class FeedbackCategory extends BaseModel
     /**
      * Get all descendants (recursive children).
      */
-    public function descendants(): HasMany
+    public function descendants()
     {
         return $this->children()->with('descendants');
     }

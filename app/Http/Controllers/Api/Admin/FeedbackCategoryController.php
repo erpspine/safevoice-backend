@@ -89,7 +89,9 @@ class FeedbackCategoryController extends Controller
                             ->whereNull('deleted_at');
                     }),
                 ],
+                'name_sw' => 'nullable|string|max:100',
                 'description' => 'nullable|string|max:500',
+                'description_sw' => 'nullable|string|max:500',
                 'status' => 'required|boolean',
             ]);
 
@@ -106,7 +108,9 @@ class FeedbackCategoryController extends Controller
             $feedbackCategory = FeedbackCategory::create([
                 'company_id' => $request->company_id,
                 'name' => $request->name,
+                'name_sw' => $request->name_sw,
                 'description' => $request->description,
+                'description_sw' => $request->description_sw,
                 'status' => $request->boolean('status', true),
             ]);
 
@@ -199,7 +203,9 @@ class FeedbackCategoryController extends Controller
                         return $query;
                     }),
                 ],
+                'name_sw' => 'sometimes|nullable|string|max:100',
                 'description' => 'sometimes|nullable|string|max:500',
+                'description_sw' => 'sometimes|nullable|string|max:500',
                 'status' => 'sometimes|required|boolean',
             ]);
 
@@ -214,7 +220,7 @@ class FeedbackCategoryController extends Controller
 
             // Update feedback category
             $updateData = [];
-            foreach (['company_id', 'name', 'description', 'status'] as $field) {
+            foreach (['company_id', 'name', 'name_sw', 'description', 'description_sw', 'status'] as $field) {
                 if ($request->has($field)) {
                     $updateData[$field] = $request->$field;
                 }
@@ -486,9 +492,20 @@ class FeedbackCategoryController extends Controller
      * Public API to get parent (root) feedback categories for a specific company.
      * Used for the first dropdown in user portal feedback submission.
      */
-    public function publicParentCategories(string $companyId): JsonResponse
+    public function publicParentCategories(Request $request, string $companyId): JsonResponse
     {
         try {
+            // Get language parameter (default to English)
+            $language = $request->input('language', 'en');
+
+            // Validate language
+            if (!in_array($language, ['en', 'sw'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid language. Use "en" or "sw".',
+                ], 400);
+            }
+
             // Verify company exists and is active
             $company = Company::where('id', $companyId)
                 ->where('status', true)
@@ -498,19 +515,31 @@ class FeedbackCategoryController extends Controller
             $categories = FeedbackCategory::where('company_id', $companyId)
                 ->whereNull('parent_id')
                 ->where('status', true)
-                ->select(['id', 'name', 'description'])
+                ->select(['id', 'name', 'name_sw', 'description', 'description_sw'])
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($category) use ($language) {
+                    return [
+                        'id' => $category->id,
+                        'name' => $language === 'sw' && $category->name_sw ? $category->name_sw : $category->name,
+                        'description' => $language === 'sw' && $category->description_sw ? $category->description_sw : $category->description,
+                    ];
+                });
+
+            $message = $language === 'sw'
+                ? 'Aina kuu za maoni zimepatikana'
+                : 'Parent feedback categories retrieved successfully.';
 
             return response()->json([
                 'success' => true,
-                'message' => 'Parent feedback categories retrieved successfully.',
+                'message' => $message,
                 'data' => [
                     'company_id' => $companyId,
                     'company_name' => $company->name,
                     'categories' => $categories,
-                    'total' => $categories->count()
+                    'total' => $categories->count(),
+                    'language' => $language
                 ]
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -519,6 +548,12 @@ class FeedbackCategoryController extends Controller
                 'message' => 'Company not found or inactive.',
             ], 404);
         } catch (\Exception $e) {
+            Log::error('Failed to retrieve parent feedback categories', [
+                'company_id' => $companyId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve parent feedback categories.',
@@ -531,9 +566,20 @@ class FeedbackCategoryController extends Controller
      * Public API to get subcategories for a specific parent feedback category.
      * Used for the second dropdown in user portal feedback submission.
      */
-    public function publicSubcategories(string $companyId, string $parentId): JsonResponse
+    public function publicSubcategories(Request $request, string $companyId, string $parentId): JsonResponse
     {
         try {
+            // Get language parameter (default to English)
+            $language = $request->input('language', 'en');
+
+            // Validate language
+            if (!in_array($language, ['en', 'sw'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid language. Use "en" or "sw".',
+                ], 400);
+            }
+
             // Verify company exists and is active
             $company = Company::where('id', $companyId)
                 ->where('status', true)
@@ -544,36 +590,56 @@ class FeedbackCategoryController extends Controller
                 ->where('company_id', $companyId)
                 ->where('status', true)
                 ->whereNull('parent_id')
+                ->select(['id', 'name', 'name_sw'])
                 ->firstOrFail();
 
             // Get subcategories for this parent
             $subcategories = FeedbackCategory::where('company_id', $companyId)
                 ->where('parent_id', $parentId)
                 ->where('status', true)
-                ->select(['id', 'name', 'description'])
+                ->select(['id', 'name', 'name_sw', 'description', 'description_sw'])
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($category) use ($language) {
+                    return [
+                        'id' => $category->id,
+                        'name' => $language === 'sw' && $category->name_sw ? $category->name_sw : $category->name,
+                        'description' => $language === 'sw' && $category->description_sw ? $category->description_sw : $category->description,
+                    ];
+                });
+
+            $message = $language === 'sw'
+                ? 'Aina ndogo za maoni zimepatikana'
+                : 'Feedback subcategories retrieved successfully.';
 
             return response()->json([
                 'success' => true,
-                'message' => 'Feedback subcategories retrieved successfully.',
+                'message' => $message,
                 'data' => [
                     'company_id' => $companyId,
                     'parent_category' => [
                         'id' => $parentCategory->id,
-                        'name' => $parentCategory->name,
+                        'name' => $language === 'sw' && $parentCategory->name_sw ? $parentCategory->name_sw : $parentCategory->name,
                     ],
                     'subcategories' => $subcategories,
-                    'total' => $subcategories->count()
+                    'total' => $subcategories->count(),
+                    'language' => $language
                 ]
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Company, or parent category not found.',
+                'message' => 'Company or parent category not found.',
             ], 404);
         } catch (\Exception $e) {
+            Log::error('Failed to retrieve feedback subcategories', [
+                'company_id' => $companyId,
+                'parent_id' => $parentId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve feedback subcategories.',

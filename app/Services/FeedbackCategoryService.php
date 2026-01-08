@@ -46,6 +46,7 @@ class FeedbackCategoryService
 
         $result = [
             'added' => [],
+            'updated' => [],
             'removed' => [],
             'preserved' => [],
         ];
@@ -83,12 +84,41 @@ class FeedbackCategoryService
                             'name' => $categoryData['name'],
                             'action' => 'restored',
                         ];
+                    }
+
+                    // Update existing category with latest template content
+                    $updatedFields = [];
+                    if ($existingParent->name !== $categoryData['name']) {
+                        $updatedFields['name'] = $categoryData['name'];
+                    }
+                    if ($existingParent->name_sw !== ($categoryData['name_sw'] ?? null)) {
+                        $updatedFields['name_sw'] = $categoryData['name_sw'] ?? null;
+                    }
+                    $templateDescription = $categoryData['description'] ?? "Category for {$categoryData['name']}";
+                    if ($existingParent->description !== $templateDescription) {
+                        $updatedFields['description'] = $templateDescription;
+                    }
+                    if ($existingParent->description_sw !== ($categoryData['description_sw'] ?? null)) {
+                        $updatedFields['description_sw'] = $categoryData['description_sw'] ?? null;
+                    }
+                    if ($existingParent->sort_order !== $categoryData['sort_order']) {
+                        $updatedFields['sort_order'] = $categoryData['sort_order'];
+                    }
+
+                    if (!empty($updatedFields)) {
+                        $existingParent->update($updatedFields);
+                        $result['updated'][] = [
+                            'type' => 'parent',
+                            'name' => $categoryData['name'],
+                            'fields' => array_keys($updatedFields),
+                        ];
                     } else {
                         $result['preserved'][] = [
                             'type' => 'parent',
                             'name' => $categoryData['name'],
                         ];
                     }
+
                     $categoryMap[$categoryKey] = $existingParent->id;
                 } else {
                     // Create new parent category
@@ -96,9 +126,11 @@ class FeedbackCategoryService
                         'company_id' => $company->id,
                         'parent_id' => null,
                         'name' => $categoryData['name'],
+                        'name_sw' => $categoryData['name_sw'] ?? null,
                         'category_key' => $categoryKey,
                         'status' => true,
-                        'description' => "Category for {$categoryData['name']}",
+                        'description' => $categoryData['description'] ?? "Category for {$categoryData['name']}",
+                        'description_sw' => $categoryData['description_sw'] ?? null,
                         'sort_order' => $categoryData['sort_order'],
                     ]);
                     $categoryMap[$categoryKey] = $newParent->id;
@@ -120,13 +152,36 @@ class FeedbackCategoryService
                         // Restore if soft-deleted
                         if ($existingSub->trashed()) {
                             $existingSub->restore();
-                            // Update parent_id in case it changed
-                            $existingSub->update(['parent_id' => $categoryMap[$categoryKey]]);
                             $result['added'][] = [
                                 'type' => 'subcategory',
                                 'name' => $subcategoryData['name'],
                                 'parent' => $categoryData['name'],
                                 'action' => 'restored',
+                            ];
+                        }
+
+                        // Update existing subcategory with latest template content
+                        $updatedFields = [];
+                        if ($existingSub->parent_id !== $categoryMap[$categoryKey]) {
+                            $updatedFields['parent_id'] = $categoryMap[$categoryKey];
+                        }
+                        if ($existingSub->name !== $subcategoryData['name']) {
+                            $updatedFields['name'] = $subcategoryData['name'];
+                        }
+                        if ($existingSub->name_sw !== ($subcategoryData['name_sw'] ?? null)) {
+                            $updatedFields['name_sw'] = $subcategoryData['name_sw'] ?? null;
+                        }
+                        if ($existingSub->sort_order !== $subcategoryData['sort_order']) {
+                            $updatedFields['sort_order'] = $subcategoryData['sort_order'];
+                        }
+
+                        if (!empty($updatedFields)) {
+                            $existingSub->update($updatedFields);
+                            $result['updated'][] = [
+                                'type' => 'subcategory',
+                                'name' => $subcategoryData['name'],
+                                'parent' => $categoryData['name'],
+                                'fields' => array_keys($updatedFields),
                             ];
                         } else {
                             $result['preserved'][] = [
@@ -141,6 +196,7 @@ class FeedbackCategoryService
                             'company_id' => $company->id,
                             'parent_id' => $categoryMap[$categoryKey],
                             'name' => $subcategoryData['name'],
+                            'name_sw' => $subcategoryData['name_sw'] ?? null,
                             'category_key' => $categoryKey,
                             'status' => true,
                             'description' => null,
@@ -172,14 +228,20 @@ class FeedbackCategoryService
             }
         });
 
+        $addedCount = count($result['added']);
+        $updatedCount = count($result['updated']);
+        $removedCount = count($result['removed']);
+        $preservedCount = count($result['preserved']);
+
         $result['message'] = sprintf(
-            'Sync completed: %d added, %d removed, %d preserved',
-            count($result['added']),
-            count($result['removed']),
-            count($result['preserved'])
+            'Sync completed: %d added, %d updated, %d removed, %d preserved',
+            $addedCount,
+            $updatedCount,
+            $removedCount,
+            $preservedCount
         );
 
-        Log::info("Feedback categories synced for company {$company->id}", $result);
+        Log::info("Feedback categories synced for company {$company->id}: {$addedCount} added, {$updatedCount} updated, {$removedCount} removed, {$preservedCount} preserved", $result);
 
         return $result;
     }
@@ -224,9 +286,11 @@ class FeedbackCategoryService
                     'company_id' => $company->id,
                     'parent_id' => null,
                     'name' => $categoryData['name'],
+                    'name_sw' => $categoryData['name_sw'] ?? null,
                     'category_key' => $categoryKey,
                     'status' => true,
                     'description' => $categoryData['description'],
+                    'description_sw' => $categoryData['description_sw'] ?? null,
                     'sort_order' => $categoryData['sort_order'],
                 ]);
 
@@ -243,6 +307,7 @@ class FeedbackCategoryService
                         'company_id' => $company->id,
                         'parent_id' => $parent->id,
                         'name' => $subcategoryData['name'],
+                        'name_sw' => $subcategoryData['name_sw'] ?? null,
                         'category_key' => $categoryKey,
                         'status' => true,
                         'description' => null,
@@ -278,7 +343,9 @@ class FeedbackCategoryService
             if (!isset($structure[$key])) {
                 $structure[$key] = [
                     'name' => $template->category_name,
+                    'name_sw' => $template->category_name_sw,
                     'description' => $template->description,
+                    'description_sw' => $template->description_sw,
                     'sort_order' => $template->sort_order,
                     'subcategories' => [],
                 ];
@@ -287,6 +354,7 @@ class FeedbackCategoryService
             if ($template->subcategory_name) {
                 $structure[$key]['subcategories'][] = [
                     'name' => $template->subcategory_name,
+                    'name_sw' => $template->subcategory_name_sw,
                     'sort_order' => $template->sort_order,
                 ];
             }
