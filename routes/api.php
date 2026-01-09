@@ -52,6 +52,7 @@ use App\Http\Controllers\Api\Admin\SectorFeedbackTemplateController;
 use App\Http\Controllers\Api\Admin\SectorDepartmentTemplateController;
 use App\Http\Controllers\Api\Admin\CaseTrackingController;
 use App\Http\Controllers\Api\Admin\EscalationRuleController;
+use App\Http\Controllers\Api\SalesInquiryController;
 
 // Investigator Controllers
 use App\Http\Controllers\Api\Investigator\InvestigatorAuthController;
@@ -102,6 +103,9 @@ Route::prefix('invitations')->group(function () {
 
 // Public API Routes (No authentication required)
 Route::prefix('public')->group(function () {
+    // Sales inquiry endpoint - No authentication required
+    Route::post('sales-inquiry', [SalesInquiryController::class, 'submit'])->name('public.sales-inquiry');
+
     // Get companies for frontend dropdowns, registration forms, etc.
     Route::get('companies', [CompanyController::class, 'publicIndex'])->name('public.companies.index');
 
